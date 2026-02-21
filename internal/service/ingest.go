@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -85,6 +86,8 @@ Recipe text:
 
 // ExtractRecipe calls the OpenAI API to parse free text into a StagedRecipe.
 func (s *Service) ExtractRecipe(ctx context.Context, rawText string) (*StagedRecipe, error) {
+	slog.Info("LLM extraction starting", "model", s.extractModel, "input_len", len(rawText))
+
 	reqBody := openAIRequest{
 		Model: s.extractModel,
 		Messages: []openAIMessage{
@@ -130,6 +133,8 @@ func (s *Service) ExtractRecipe(ctx context.Context, rawText string) (*StagedRec
 	if err := json.Unmarshal([]byte(aiResp.Choices[0].Message.Content), &staged); err != nil {
 		return nil, fmt.Errorf("parse extracted recipe json: %w", err)
 	}
+
+	slog.Info("LLM extraction complete", "title", staged.Title, "ingredients", len(staged.Ingredients), "steps", len(staged.Steps))
 	return &staged, nil
 }
 
@@ -181,6 +186,8 @@ func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (
 		return nil, fmt.Errorf("unmarshal staged data: %w", err)
 	}
 
+	slog.Info("committing staged recipe", "job_id", job.ID, "title", staged.Title, "ingredients", len(staged.Ingredients))
+
 	tx, err := s.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -222,6 +229,7 @@ func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (
 		if err != nil {
 			return nil, fmt.Errorf("resolve ingredient %q: %w", ing.Name, err)
 		}
+		slog.Info("resolved ingredient", "name", ing.Name, "ingredient_id", ingredientID)
 		if _, err := qtx.CreateRecipeIngredient(ctx, db.CreateRecipeIngredientParams{
 			RecipeID:         recipe.ID,
 			IngredientID:     ingredientID,
@@ -238,5 +246,6 @@ func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
 
+	slog.Info("recipe committed", "recipe_id", recipe.ID, "title", recipe.Title)
 	return &recipe, nil
 }
