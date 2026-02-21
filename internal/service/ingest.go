@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -118,7 +119,8 @@ func (s *Service) ExtractRecipe(ctx context.Context, rawText string) (*StagedRec
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai returned status %d", resp.StatusCode)
+		raw, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("openai returned status %d: %s", resp.StatusCode, string(raw))
 	}
 
 	var aiResp openAIResponse
