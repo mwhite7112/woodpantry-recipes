@@ -12,24 +12,26 @@ import (
 	"github.com/google/uuid"
 )
 
+type IngestionJob struct {
+	ID         uuid.UUID
+	Type       string
+	RawInput   string
+	Status     string
+	StagedData *json.RawMessage
+	CreatedAt  time.Time
+}
+
 type Recipe struct {
 	ID          uuid.UUID
 	Title       string
 	Description sql.NullString
-	SourceURL   sql.NullString
+	SourceUrl   sql.NullString
 	Servings    sql.NullInt32
 	PrepMinutes sql.NullInt32
 	CookMinutes sql.NullInt32
 	Tags        []string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-}
-
-type RecipeStep struct {
-	ID          uuid.UUID
-	RecipeID    uuid.UUID
-	StepNumber  int32
-	Instruction string
 }
 
 type RecipeIngredient struct {
@@ -42,11 +44,9 @@ type RecipeIngredient struct {
 	PreparationNotes sql.NullString
 }
 
-type IngestionJob struct {
-	ID         uuid.UUID
-	Type       string
-	RawInput   string
-	Status     string
-	StagedData json.RawMessage
-	CreatedAt  time.Time
+type RecipeStep struct {
+	ID          uuid.UUID
+	RecipeID    uuid.UUID
+	StepNumber  int32
+	Instruction string
 }

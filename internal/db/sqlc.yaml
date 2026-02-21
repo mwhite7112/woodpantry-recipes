@@ -7,3 +7,9 @@ sql:
       go:
         package: "db"
         out: "."
+        overrides:
+          - column: "ingestion_jobs.staged_data"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+              pointer: true

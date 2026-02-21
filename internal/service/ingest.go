@@ -182,7 +182,10 @@ func (s *Service) resolveIngredient(ctx context.Context, name string) (uuid.UUID
 // CommitStagedRecipe resolves all ingredients and persists the recipe.
 func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (*db.Recipe, error) {
 	var staged StagedRecipe
-	if err := json.Unmarshal(job.StagedData, &staged); err != nil {
+	if job.StagedData == nil {
+		return nil, fmt.Errorf("staged data is nil")
+	}
+	if err := json.Unmarshal(*job.StagedData, &staged); err != nil {
 		return nil, fmt.Errorf("unmarshal staged data: %w", err)
 	}
 
@@ -204,7 +207,7 @@ func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (
 	recipe, err := qtx.CreateRecipe(ctx, db.CreateRecipeParams{
 		Title:       staged.Title,
 		Description: nullString(staged.Description),
-		SourceURL:   nullString(staged.SourceURL),
+		SourceUrl:   nullString(staged.SourceURL),
 		Servings:    nullInt32(staged.Servings),
 		PrepMinutes: nullInt32(staged.PrepMinutes),
 		CookMinutes: nullInt32(staged.CookMinutes),
