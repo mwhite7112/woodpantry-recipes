@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -11,12 +12,14 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/mwhite7112/woodpantry-recipes/internal/db"
+	"github.com/mwhite7112/woodpantry-recipes/internal/logging"
 	"github.com/mwhite7112/woodpantry-recipes/internal/service"
 )
 
 // NewRouter wires up all routes.
 func NewRouter(svc *service.Service) http.Handler {
 	r := chi.NewRouter()
+	r.Use(logging.Middleware)
 	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", handleHealth)
@@ -67,7 +70,7 @@ func handleListRecipes(svc *service.Service) http.HandlerFunc {
 		}
 
 		if err != nil {
-			jsonError(w, "failed to list recipes", http.StatusInternalServerError)
+			jsonError(w, "failed to list recipes", http.StatusInternalServerError, err)
 			return
 		}
 		if recipes == nil {
@@ -118,7 +121,7 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 
 		tx, err := svc.DB().BeginTx(r.Context(), nil)
 		if err != nil {
-			jsonError(w, "failed to start transaction", http.StatusInternalServerError)
+			jsonError(w, "failed to start transaction", http.StatusInternalServerError, err)
 			return
 		}
 		defer tx.Rollback() //nolint:errcheck
@@ -135,7 +138,7 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 			Tags:        tags,
 		})
 		if err != nil {
-			jsonError(w, "failed to create recipe", http.StatusInternalServerError)
+			jsonError(w, "failed to create recipe", http.StatusInternalServerError, err)
 			return
 		}
 
@@ -145,7 +148,7 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 				StepNumber:  int32(step.StepNumber),
 				Instruction: step.Instruction,
 			}); err != nil {
-				jsonError(w, "failed to create step", http.StatusInternalServerError)
+				jsonError(w, "failed to create step", http.StatusInternalServerError, err)
 				return
 			}
 		}
@@ -164,13 +167,13 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 				IsOptional:       ing.IsOptional,
 				PreparationNotes: nullString(ing.PreparationNotes),
 			}); err != nil {
-				jsonError(w, "failed to create recipe ingredient", http.StatusInternalServerError)
+				jsonError(w, "failed to create recipe ingredient", http.StatusInternalServerError, err)
 				return
 			}
 		}
 
 		if err := tx.Commit(); err != nil {
-			jsonError(w, "failed to commit", http.StatusInternalServerError)
+			jsonError(w, "failed to commit", http.StatusInternalServerError, err)
 			return
 		}
 
@@ -201,17 +204,17 @@ func handleGetRecipe(svc *service.Service) http.HandlerFunc {
 				jsonError(w, "recipe not found", http.StatusNotFound)
 				return
 			}
-			jsonError(w, "failed to get recipe", http.StatusInternalServerError)
+			jsonError(w, "failed to get recipe", http.StatusInternalServerError, err)
 			return
 		}
 		steps, err := svc.Queries().ListStepsByRecipe(r.Context(), id)
 		if err != nil {
-			jsonError(w, "failed to get steps", http.StatusInternalServerError)
+			jsonError(w, "failed to get steps", http.StatusInternalServerError, err)
 			return
 		}
 		ingredients, err := svc.Queries().ListIngredientsByRecipe(r.Context(), id)
 		if err != nil {
-			jsonError(w, "failed to get ingredients", http.StatusInternalServerError)
+			jsonError(w, "failed to get ingredients", http.StatusInternalServerError, err)
 			return
 		}
 		if steps == nil {
@@ -240,7 +243,7 @@ func handleUpdateRecipe(svc *service.Service) http.HandlerFunc {
 				jsonError(w, "recipe not found", http.StatusNotFound)
 				return
 			}
-			jsonError(w, "failed to get recipe", http.StatusInternalServerError)
+			jsonError(w, "failed to get recipe", http.StatusInternalServerError, err)
 			return
 		}
 
@@ -260,7 +263,7 @@ func handleUpdateRecipe(svc *service.Service) http.HandlerFunc {
 
 		tx, err := svc.DB().BeginTx(r.Context(), nil)
 		if err != nil {
-			jsonError(w, "failed to start transaction", http.StatusInternalServerError)
+			jsonError(w, "failed to start transaction", http.StatusInternalServerError, err)
 			return
 		}
 		defer tx.Rollback() //nolint:errcheck
@@ -278,12 +281,12 @@ func handleUpdateRecipe(svc *service.Service) http.HandlerFunc {
 			Tags:        tags,
 		})
 		if err != nil {
-			jsonError(w, "failed to update recipe", http.StatusInternalServerError)
+			jsonError(w, "failed to update recipe", http.StatusInternalServerError, err)
 			return
 		}
 
 		if err := qtx.DeleteStepsByRecipe(r.Context(), id); err != nil {
-			jsonError(w, "failed to clear steps", http.StatusInternalServerError)
+			jsonError(w, "failed to clear steps", http.StatusInternalServerError, err)
 			return
 		}
 		for _, step := range req.Steps {
@@ -292,13 +295,13 @@ func handleUpdateRecipe(svc *service.Service) http.HandlerFunc {
 				StepNumber:  int32(step.StepNumber),
 				Instruction: step.Instruction,
 			}); err != nil {
-				jsonError(w, "failed to update step", http.StatusInternalServerError)
+				jsonError(w, "failed to update step", http.StatusInternalServerError, err)
 				return
 			}
 		}
 
 		if err := qtx.DeleteIngredientsByRecipe(r.Context(), id); err != nil {
-			jsonError(w, "failed to clear ingredients", http.StatusInternalServerError)
+			jsonError(w, "failed to clear ingredients", http.StatusInternalServerError, err)
 			return
 		}
 		for _, ing := range req.Ingredients {
@@ -315,13 +318,13 @@ func handleUpdateRecipe(svc *service.Service) http.HandlerFunc {
 				IsOptional:       ing.IsOptional,
 				PreparationNotes: nullString(ing.PreparationNotes),
 			}); err != nil {
-				jsonError(w, "failed to update ingredient", http.StatusInternalServerError)
+				jsonError(w, "failed to update ingredient", http.StatusInternalServerError, err)
 				return
 			}
 		}
 
 		if err := tx.Commit(); err != nil {
-			jsonError(w, "failed to commit", http.StatusInternalServerError)
+			jsonError(w, "failed to commit", http.StatusInternalServerError, err)
 			return
 		}
 
@@ -343,7 +346,7 @@ func handleDeleteRecipe(svc *service.Service) http.HandlerFunc {
 				jsonError(w, "recipe not found", http.StatusNotFound)
 				return
 			}
-			jsonError(w, "failed to delete recipe", http.StatusInternalServerError)
+			jsonError(w, "failed to delete recipe", http.StatusInternalServerError, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -373,7 +376,7 @@ func handleIngest(svc *service.Service) http.HandlerFunc {
 			RawInput: req.Text,
 		})
 		if err != nil {
-			jsonError(w, "failed to create ingestion job", http.StatusInternalServerError)
+			jsonError(w, "failed to create ingestion job", http.StatusInternalServerError, err)
 			return
 		}
 
@@ -382,7 +385,7 @@ func handleIngest(svc *service.Service) http.HandlerFunc {
 			ID:     job.ID,
 			Status: "processing",
 		}); err != nil {
-			jsonError(w, "failed to update job status", http.StatusInternalServerError)
+			jsonError(w, "failed to update job status", http.StatusInternalServerError, err)
 			return
 		}
 
@@ -392,13 +395,13 @@ func handleIngest(svc *service.Service) http.HandlerFunc {
 				ID:     job.ID,
 				Status: "failed",
 			})
-			jsonError(w, "extraction failed: "+err.Error(), http.StatusInternalServerError)
+			jsonError(w, "extraction failed: "+err.Error(), http.StatusInternalServerError, err)
 			return
 		}
 
 		stagedJSON, err := json.Marshal(staged)
 		if err != nil {
-			jsonError(w, "failed to serialize staged recipe", http.StatusInternalServerError)
+			jsonError(w, "failed to serialize staged recipe", http.StatusInternalServerError, err)
 			return
 		}
 
@@ -407,7 +410,7 @@ func handleIngest(svc *service.Service) http.HandlerFunc {
 			StagedData: stagedJSON,
 		})
 		if err != nil {
-			jsonError(w, "failed to stage recipe", http.StatusInternalServerError)
+			jsonError(w, "failed to stage recipe", http.StatusInternalServerError, err)
 			return
 		}
 
@@ -430,7 +433,7 @@ func handleGetIngestJob(svc *service.Service) http.HandlerFunc {
 				jsonError(w, "job not found", http.StatusNotFound)
 				return
 			}
-			jsonError(w, "failed to get job", http.StatusInternalServerError)
+			jsonError(w, "failed to get job", http.StatusInternalServerError, err)
 			return
 		}
 		jsonOK(w, job)
@@ -450,7 +453,7 @@ func handleConfirmIngest(svc *service.Service) http.HandlerFunc {
 				jsonError(w, "job not found", http.StatusNotFound)
 				return
 			}
-			jsonError(w, "failed to get job", http.StatusInternalServerError)
+			jsonError(w, "failed to get job", http.StatusInternalServerError, err)
 			return
 		}
 		if job.Status != "staged" {
@@ -460,7 +463,7 @@ func handleConfirmIngest(svc *service.Service) http.HandlerFunc {
 
 		recipe, err := svc.CommitStagedRecipe(r.Context(), job)
 		if err != nil {
-			jsonError(w, "failed to commit recipe: "+err.Error(), http.StatusInternalServerError)
+			jsonError(w, "failed to commit recipe: "+err.Error(), http.StatusInternalServerError, err)
 			return
 		}
 
@@ -468,8 +471,7 @@ func handleConfirmIngest(svc *service.Service) http.HandlerFunc {
 			ID:     job.ID,
 			Status: "confirmed",
 		}); err != nil {
-			// Recipe already committed; log but don't fail.
-			_ = err
+			slog.Error("failed to mark job confirmed (recipe already committed)", "job_id", job.ID, "error", err)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -485,7 +487,10 @@ func jsonOK(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v) //nolint:errcheck
 }
 
-func jsonError(w http.ResponseWriter, msg string, status int) {
+func jsonError(w http.ResponseWriter, msg string, status int, errs ...error) {
+	if status >= 500 && len(errs) > 0 {
+		slog.Error(msg, "status", status, "error", errs[0])
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg}) //nolint:errcheck
