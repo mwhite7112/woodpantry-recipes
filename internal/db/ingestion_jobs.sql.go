@@ -26,7 +26,14 @@ type CreateIngestionJobParams struct {
 func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJobParams) (IngestionJob, error) {
 	row := q.db.QueryRowContext(ctx, createIngestionJob, arg.Type, arg.RawInput)
 	var i IngestionJob
-	err := row.Scan(&i.ID, &i.Type, &i.RawInput, &i.Status, &i.StagedData, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.RawInput,
+		&i.Status,
+		&i.StagedData,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 
@@ -38,7 +45,40 @@ FROM ingestion_jobs WHERE id = $1
 func (q *Queries) GetIngestionJob(ctx context.Context, id uuid.UUID) (IngestionJob, error) {
 	row := q.db.QueryRowContext(ctx, getIngestionJob, id)
 	var i IngestionJob
-	err := row.Scan(&i.ID, &i.Type, &i.RawInput, &i.Status, &i.StagedData, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.RawInput,
+		&i.Status,
+		&i.StagedData,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateIngestionJobStaged = `-- name: UpdateIngestionJobStaged :one
+UPDATE ingestion_jobs
+SET status = 'staged', staged_data = $2
+WHERE id = $1
+RETURNING id, type, raw_input, status, staged_data, created_at
+`
+
+type UpdateIngestionJobStagedParams struct {
+	ID         uuid.UUID
+	StagedData *json.RawMessage
+}
+
+func (q *Queries) UpdateIngestionJobStaged(ctx context.Context, arg UpdateIngestionJobStagedParams) (IngestionJob, error) {
+	row := q.db.QueryRowContext(ctx, updateIngestionJobStaged, arg.ID, arg.StagedData)
+	var i IngestionJob
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.RawInput,
+		&i.Status,
+		&i.StagedData,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 
@@ -57,25 +97,13 @@ type UpdateIngestionJobStatusParams struct {
 func (q *Queries) UpdateIngestionJobStatus(ctx context.Context, arg UpdateIngestionJobStatusParams) (IngestionJob, error) {
 	row := q.db.QueryRowContext(ctx, updateIngestionJobStatus, arg.ID, arg.Status)
 	var i IngestionJob
-	err := row.Scan(&i.ID, &i.Type, &i.RawInput, &i.Status, &i.StagedData, &i.CreatedAt)
-	return i, err
-}
-
-const updateIngestionJobStaged = `-- name: UpdateIngestionJobStaged :one
-UPDATE ingestion_jobs
-SET status = 'staged', staged_data = $2
-WHERE id = $1
-RETURNING id, type, raw_input, status, staged_data, created_at
-`
-
-type UpdateIngestionJobStagedParams struct {
-	ID         uuid.UUID
-	StagedData json.RawMessage
-}
-
-func (q *Queries) UpdateIngestionJobStaged(ctx context.Context, arg UpdateIngestionJobStagedParams) (IngestionJob, error) {
-	row := q.db.QueryRowContext(ctx, updateIngestionJobStaged, arg.ID, arg.StagedData)
-	var i IngestionJob
-	err := row.Scan(&i.ID, &i.Type, &i.RawInput, &i.Status, &i.StagedData, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.RawInput,
+		&i.Status,
+		&i.StagedData,
+		&i.CreatedAt,
+	)
 	return i, err
 }

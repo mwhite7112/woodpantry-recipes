@@ -12,35 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const listIngredientsByRecipe = `-- name: ListIngredientsByRecipe :many
-SELECT id, recipe_id, ingredient_id, quantity, unit, is_optional, preparation_notes
-FROM recipe_ingredients
-WHERE recipe_id = $1
-`
-
-func (q *Queries) ListIngredientsByRecipe(ctx context.Context, recipeID uuid.UUID) ([]RecipeIngredient, error) {
-	rows, err := q.db.QueryContext(ctx, listIngredientsByRecipe, recipeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []RecipeIngredient
-	for rows.Next() {
-		var i RecipeIngredient
-		if err := rows.Scan(
-			&i.ID, &i.RecipeID, &i.IngredientID,
-			&i.Quantity, &i.Unit, &i.IsOptional, &i.PreparationNotes,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return items, rows.Err()
-}
-
 const createRecipeIngredient = `-- name: CreateRecipeIngredient :one
 INSERT INTO recipe_ingredients (recipe_id, ingredient_id, quantity, unit, is_optional, preparation_notes)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -58,13 +29,22 @@ type CreateRecipeIngredientParams struct {
 
 func (q *Queries) CreateRecipeIngredient(ctx context.Context, arg CreateRecipeIngredientParams) (RecipeIngredient, error) {
 	row := q.db.QueryRowContext(ctx, createRecipeIngredient,
-		arg.RecipeID, arg.IngredientID, arg.Quantity, arg.Unit,
-		arg.IsOptional, arg.PreparationNotes,
+		arg.RecipeID,
+		arg.IngredientID,
+		arg.Quantity,
+		arg.Unit,
+		arg.IsOptional,
+		arg.PreparationNotes,
 	)
 	var i RecipeIngredient
 	err := row.Scan(
-		&i.ID, &i.RecipeID, &i.IngredientID,
-		&i.Quantity, &i.Unit, &i.IsOptional, &i.PreparationNotes,
+		&i.ID,
+		&i.RecipeID,
+		&i.IngredientID,
+		&i.Quantity,
+		&i.Unit,
+		&i.IsOptional,
+		&i.PreparationNotes,
 	)
 	return i, err
 }
@@ -76,4 +56,41 @@ DELETE FROM recipe_ingredients WHERE recipe_id = $1
 func (q *Queries) DeleteIngredientsByRecipe(ctx context.Context, recipeID uuid.UUID) error {
 	_, err := q.db.ExecContext(ctx, deleteIngredientsByRecipe, recipeID)
 	return err
+}
+
+const listIngredientsByRecipe = `-- name: ListIngredientsByRecipe :many
+SELECT id, recipe_id, ingredient_id, quantity, unit, is_optional, preparation_notes
+FROM recipe_ingredients
+WHERE recipe_id = $1
+`
+
+func (q *Queries) ListIngredientsByRecipe(ctx context.Context, recipeID uuid.UUID) ([]RecipeIngredient, error) {
+	rows, err := q.db.QueryContext(ctx, listIngredientsByRecipe, recipeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecipeIngredient
+	for rows.Next() {
+		var i RecipeIngredient
+		if err := rows.Scan(
+			&i.ID,
+			&i.RecipeID,
+			&i.IngredientID,
+			&i.Quantity,
+			&i.Unit,
+			&i.IsOptional,
+			&i.PreparationNotes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

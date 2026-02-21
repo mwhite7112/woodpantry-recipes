@@ -11,6 +11,39 @@ import (
 	"github.com/google/uuid"
 )
 
+const createStep = `-- name: CreateStep :one
+INSERT INTO recipe_steps (recipe_id, step_number, instruction)
+VALUES ($1, $2, $3)
+RETURNING id, recipe_id, step_number, instruction
+`
+
+type CreateStepParams struct {
+	RecipeID    uuid.UUID
+	StepNumber  int32
+	Instruction string
+}
+
+func (q *Queries) CreateStep(ctx context.Context, arg CreateStepParams) (RecipeStep, error) {
+	row := q.db.QueryRowContext(ctx, createStep, arg.RecipeID, arg.StepNumber, arg.Instruction)
+	var i RecipeStep
+	err := row.Scan(
+		&i.ID,
+		&i.RecipeID,
+		&i.StepNumber,
+		&i.Instruction,
+	)
+	return i, err
+}
+
+const deleteStepsByRecipe = `-- name: DeleteStepsByRecipe :exec
+DELETE FROM recipe_steps WHERE recipe_id = $1
+`
+
+func (q *Queries) DeleteStepsByRecipe(ctx context.Context, recipeID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, deleteStepsByRecipe, recipeID)
+	return err
+}
+
 const listStepsByRecipe = `-- name: ListStepsByRecipe :many
 SELECT id, recipe_id, step_number, instruction
 FROM recipe_steps
@@ -27,7 +60,12 @@ func (q *Queries) ListStepsByRecipe(ctx context.Context, recipeID uuid.UUID) ([]
 	var items []RecipeStep
 	for rows.Next() {
 		var i RecipeStep
-		if err := rows.Scan(&i.ID, &i.RecipeID, &i.StepNumber, &i.Instruction); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.RecipeID,
+			&i.StepNumber,
+			&i.Instruction,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -35,33 +73,8 @@ func (q *Queries) ListStepsByRecipe(ctx context.Context, recipeID uuid.UUID) ([]
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	return items, rows.Err()
-}
-
-const createStep = `-- name: CreateStep :one
-INSERT INTO recipe_steps (recipe_id, step_number, instruction)
-VALUES ($1, $2, $3)
-RETURNING id, recipe_id, step_number, instruction
-`
-
-type CreateStepParams struct {
-	RecipeID    uuid.UUID
-	StepNumber  int32
-	Instruction string
-}
-
-func (q *Queries) CreateStep(ctx context.Context, arg CreateStepParams) (RecipeStep, error) {
-	row := q.db.QueryRowContext(ctx, createStep, arg.RecipeID, arg.StepNumber, arg.Instruction)
-	var i RecipeStep
-	err := row.Scan(&i.ID, &i.RecipeID, &i.StepNumber, &i.Instruction)
-	return i, err
-}
-
-const deleteStepsByRecipe = `-- name: DeleteStepsByRecipe :exec
-DELETE FROM recipe_steps WHERE recipe_id = $1
-`
-
-func (q *Queries) DeleteStepsByRecipe(ctx context.Context, recipeID uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, deleteStepsByRecipe, recipeID)
-	return err
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

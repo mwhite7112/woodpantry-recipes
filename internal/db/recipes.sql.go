@@ -13,6 +13,80 @@ import (
 	"github.com/lib/pq"
 )
 
+const createRecipe = `-- name: CreateRecipe :one
+INSERT INTO recipes (title, description, source_url, servings, prep_minutes, cook_minutes, tags)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
+`
+
+type CreateRecipeParams struct {
+	Title       string
+	Description sql.NullString
+	SourceUrl   sql.NullString
+	Servings    sql.NullInt32
+	PrepMinutes sql.NullInt32
+	CookMinutes sql.NullInt32
+	Tags        []string
+}
+
+func (q *Queries) CreateRecipe(ctx context.Context, arg CreateRecipeParams) (Recipe, error) {
+	row := q.db.QueryRowContext(ctx, createRecipe,
+		arg.Title,
+		arg.Description,
+		arg.SourceUrl,
+		arg.Servings,
+		arg.PrepMinutes,
+		arg.CookMinutes,
+		pq.Array(arg.Tags),
+	)
+	var i Recipe
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.SourceUrl,
+		&i.Servings,
+		&i.PrepMinutes,
+		&i.CookMinutes,
+		pq.Array(&i.Tags),
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteRecipe = `-- name: DeleteRecipe :exec
+DELETE FROM recipes WHERE id = $1
+`
+
+func (q *Queries) DeleteRecipe(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, deleteRecipe, id)
+	return err
+}
+
+const getRecipe = `-- name: GetRecipe :one
+SELECT id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
+FROM recipes WHERE id = $1
+`
+
+func (q *Queries) GetRecipe(ctx context.Context, id uuid.UUID) (Recipe, error) {
+	row := q.db.QueryRowContext(ctx, getRecipe, id)
+	var i Recipe
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.SourceUrl,
+		&i.Servings,
+		&i.PrepMinutes,
+		&i.CookMinutes,
+		pq.Array(&i.Tags),
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listRecipes = `-- name: ListRecipes :many
 SELECT id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
 FROM recipes
@@ -29,9 +103,16 @@ func (q *Queries) ListRecipes(ctx context.Context) ([]Recipe, error) {
 	for rows.Next() {
 		var i Recipe
 		if err := rows.Scan(
-			&i.ID, &i.Title, &i.Description, &i.SourceURL,
-			&i.Servings, &i.PrepMinutes, &i.CookMinutes,
-			pq.Array(&i.Tags), &i.CreatedAt, &i.UpdatedAt,
+			&i.ID,
+			&i.Title,
+			&i.Description,
+			&i.SourceUrl,
+			&i.Servings,
+			&i.PrepMinutes,
+			&i.CookMinutes,
+			pq.Array(&i.Tags),
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -40,54 +121,133 @@ func (q *Queries) ListRecipes(ctx context.Context) ([]Recipe, error) {
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const getRecipe = `-- name: GetRecipe :one
+const listRecipesByCookTime = `-- name: ListRecipesByCookTime :many
 SELECT id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
-FROM recipes WHERE id = $1
+FROM recipes
+WHERE cook_minutes <= $1
+ORDER BY created_at DESC
 `
 
-func (q *Queries) GetRecipe(ctx context.Context, id uuid.UUID) (Recipe, error) {
-	row := q.db.QueryRowContext(ctx, getRecipe, id)
-	var i Recipe
-	err := row.Scan(
-		&i.ID, &i.Title, &i.Description, &i.SourceURL,
-		&i.Servings, &i.PrepMinutes, &i.CookMinutes,
-		pq.Array(&i.Tags), &i.CreatedAt, &i.UpdatedAt,
-	)
-	return i, err
+func (q *Queries) ListRecipesByCookTime(ctx context.Context, cookMinutes sql.NullInt32) ([]Recipe, error) {
+	rows, err := q.db.QueryContext(ctx, listRecipesByCookTime, cookMinutes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Recipe
+	for rows.Next() {
+		var i Recipe
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Description,
+			&i.SourceUrl,
+			&i.Servings,
+			&i.PrepMinutes,
+			&i.CookMinutes,
+			pq.Array(&i.Tags),
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const createRecipe = `-- name: CreateRecipe :one
-INSERT INTO recipes (title, description, source_url, servings, prep_minutes, cook_minutes, tags)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
+const listRecipesByTag = `-- name: ListRecipesByTag :many
+SELECT id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
+FROM recipes
+WHERE $1 = ANY(tags)
+ORDER BY created_at DESC
 `
 
-type CreateRecipeParams struct {
-	Title       string
-	Description sql.NullString
-	SourceURL   sql.NullString
-	Servings    sql.NullInt32
-	PrepMinutes sql.NullInt32
-	CookMinutes sql.NullInt32
-	Tags        []string
+func (q *Queries) ListRecipesByTag(ctx context.Context, tags []string) ([]Recipe, error) {
+	rows, err := q.db.QueryContext(ctx, listRecipesByTag, pq.Array(tags))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Recipe
+	for rows.Next() {
+		var i Recipe
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Description,
+			&i.SourceUrl,
+			&i.Servings,
+			&i.PrepMinutes,
+			&i.CookMinutes,
+			pq.Array(&i.Tags),
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-func (q *Queries) CreateRecipe(ctx context.Context, arg CreateRecipeParams) (Recipe, error) {
-	row := q.db.QueryRowContext(ctx, createRecipe,
-		arg.Title, arg.Description, arg.SourceURL,
-		arg.Servings, arg.PrepMinutes, arg.CookMinutes,
-		pq.Array(arg.Tags),
-	)
-	var i Recipe
-	err := row.Scan(
-		&i.ID, &i.Title, &i.Description, &i.SourceURL,
-		&i.Servings, &i.PrepMinutes, &i.CookMinutes,
-		pq.Array(&i.Tags), &i.CreatedAt, &i.UpdatedAt,
-	)
-	return i, err
+const listRecipesByTitle = `-- name: ListRecipesByTitle :many
+SELECT id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
+FROM recipes
+WHERE title ILIKE '%' || $1 || '%'
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListRecipesByTitle(ctx context.Context, dollar_1 sql.NullString) ([]Recipe, error) {
+	rows, err := q.db.QueryContext(ctx, listRecipesByTitle, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Recipe
+	for rows.Next() {
+		var i Recipe
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Description,
+			&i.SourceUrl,
+			&i.Servings,
+			&i.PrepMinutes,
+			&i.CookMinutes,
+			pq.Array(&i.Tags),
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateRecipe = `-- name: UpdateRecipe :one
@@ -102,7 +262,7 @@ type UpdateRecipeParams struct {
 	ID          uuid.UUID
 	Title       string
 	Description sql.NullString
-	SourceURL   sql.NullString
+	SourceUrl   sql.NullString
 	Servings    sql.NullInt32
 	PrepMinutes sql.NullInt32
 	CookMinutes sql.NullInt32
@@ -111,117 +271,27 @@ type UpdateRecipeParams struct {
 
 func (q *Queries) UpdateRecipe(ctx context.Context, arg UpdateRecipeParams) (Recipe, error) {
 	row := q.db.QueryRowContext(ctx, updateRecipe,
-		arg.ID, arg.Title, arg.Description, arg.SourceURL,
-		arg.Servings, arg.PrepMinutes, arg.CookMinutes,
+		arg.ID,
+		arg.Title,
+		arg.Description,
+		arg.SourceUrl,
+		arg.Servings,
+		arg.PrepMinutes,
+		arg.CookMinutes,
 		pq.Array(arg.Tags),
 	)
 	var i Recipe
 	err := row.Scan(
-		&i.ID, &i.Title, &i.Description, &i.SourceURL,
-		&i.Servings, &i.PrepMinutes, &i.CookMinutes,
-		pq.Array(&i.Tags), &i.CreatedAt, &i.UpdatedAt,
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.SourceUrl,
+		&i.Servings,
+		&i.PrepMinutes,
+		&i.CookMinutes,
+		pq.Array(&i.Tags),
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const deleteRecipe = `-- name: DeleteRecipe :exec
-DELETE FROM recipes WHERE id = $1
-`
-
-func (q *Queries) DeleteRecipe(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, deleteRecipe, id)
-	return err
-}
-
-const listRecipesByTag = `-- name: ListRecipesByTag :many
-SELECT id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
-FROM recipes
-WHERE $1 = ANY(tags)
-ORDER BY created_at DESC
-`
-
-func (q *Queries) ListRecipesByTag(ctx context.Context, tag string) ([]Recipe, error) {
-	rows, err := q.db.QueryContext(ctx, listRecipesByTag, tag)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Recipe
-	for rows.Next() {
-		var i Recipe
-		if err := rows.Scan(
-			&i.ID, &i.Title, &i.Description, &i.SourceURL,
-			&i.Servings, &i.PrepMinutes, &i.CookMinutes,
-			pq.Array(&i.Tags), &i.CreatedAt, &i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return items, rows.Err()
-}
-
-const listRecipesByCookTime = `-- name: ListRecipesByCookTime :many
-SELECT id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
-FROM recipes
-WHERE cook_minutes <= $1
-ORDER BY created_at DESC
-`
-
-func (q *Queries) ListRecipesByCookTime(ctx context.Context, maxCookMinutes int32) ([]Recipe, error) {
-	rows, err := q.db.QueryContext(ctx, listRecipesByCookTime, maxCookMinutes)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Recipe
-	for rows.Next() {
-		var i Recipe
-		if err := rows.Scan(
-			&i.ID, &i.Title, &i.Description, &i.SourceURL,
-			&i.Servings, &i.PrepMinutes, &i.CookMinutes,
-			pq.Array(&i.Tags), &i.CreatedAt, &i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return items, rows.Err()
-}
-
-const listRecipesByTitle = `-- name: ListRecipesByTitle :many
-SELECT id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
-FROM recipes
-WHERE title ILIKE '%' || $1 || '%'
-ORDER BY created_at DESC
-`
-
-func (q *Queries) ListRecipesByTitle(ctx context.Context, title string) ([]Recipe, error) {
-	rows, err := q.db.QueryContext(ctx, listRecipesByTitle, title)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Recipe
-	for rows.Next() {
-		var i Recipe
-		if err := rows.Scan(
-			&i.ID, &i.Title, &i.Description, &i.SourceURL,
-			&i.Servings, &i.PrepMinutes, &i.CookMinutes,
-			pq.Array(&i.Tags), &i.CreatedAt, &i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return items, rows.Err()
 }

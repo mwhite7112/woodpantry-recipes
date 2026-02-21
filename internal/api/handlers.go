@@ -55,16 +55,16 @@ func handleListRecipes(svc *service.Service) http.HandlerFunc {
 
 		switch {
 		case tag != "":
-			recipes, err = svc.Queries().ListRecipesByTag(r.Context(), tag)
+			recipes, err = svc.Queries().ListRecipesByTag(r.Context(), []string{tag})
 		case cookTimeStr != "":
 			maxCook, parseErr := strconv.ParseInt(cookTimeStr, 10, 32)
 			if parseErr != nil {
 				jsonError(w, "invalid cook_time_max", http.StatusBadRequest)
 				return
 			}
-			recipes, err = svc.Queries().ListRecipesByCookTime(r.Context(), int32(maxCook))
+			recipes, err = svc.Queries().ListRecipesByCookTime(r.Context(), sql.NullInt32{Int32: int32(maxCook), Valid: true})
 		case titleSearch != "":
-			recipes, err = svc.Queries().ListRecipesByTitle(r.Context(), titleSearch)
+			recipes, err = svc.Queries().ListRecipesByTitle(r.Context(), sql.NullString{String: titleSearch, Valid: true})
 		default:
 			recipes, err = svc.Queries().ListRecipes(r.Context())
 		}
@@ -131,7 +131,7 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 		recipe, err := qtx.CreateRecipe(r.Context(), db.CreateRecipeParams{
 			Title:       req.Title,
 			Description: nullString(req.Description),
-			SourceURL:   nullString(req.SourceURL),
+			SourceUrl:   nullString(req.SourceURL),
 			Servings:    nullInt32(req.Servings),
 			PrepMinutes: nullInt32(req.PrepMinutes),
 			CookMinutes: nullInt32(req.CookMinutes),
@@ -274,7 +274,7 @@ func handleUpdateRecipe(svc *service.Service) http.HandlerFunc {
 			ID:          id,
 			Title:       req.Title,
 			Description: nullString(req.Description),
-			SourceURL:   nullString(req.SourceURL),
+			SourceUrl:   nullString(req.SourceURL),
 			Servings:    nullInt32(req.Servings),
 			PrepMinutes: nullInt32(req.PrepMinutes),
 			CookMinutes: nullInt32(req.CookMinutes),
@@ -405,9 +405,10 @@ func handleIngest(svc *service.Service) http.HandlerFunc {
 			return
 		}
 
+		stagedRaw := json.RawMessage(stagedJSON)
 		updatedJob, err := svc.Queries().UpdateIngestionJobStaged(r.Context(), db.UpdateIngestionJobStagedParams{
 			ID:         job.ID,
-			StagedData: stagedJSON,
+			StagedData: &stagedRaw,
 		})
 		if err != nil {
 			jsonError(w, "failed to stage recipe", http.StatusInternalServerError, err)
