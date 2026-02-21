@@ -126,7 +126,7 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 		}
 		defer tx.Rollback() //nolint:errcheck
 
-		qtx := svc.Queries().WithTx(tx)
+		qtx := db.New(tx)
 
 		recipe, err := qtx.CreateRecipe(r.Context(), db.CreateRecipeParams{
 			Title:       req.Title,
@@ -268,7 +268,7 @@ func handleUpdateRecipe(svc *service.Service) http.HandlerFunc {
 		}
 		defer tx.Rollback() //nolint:errcheck
 
-		qtx := svc.Queries().WithTx(tx)
+		qtx := db.New(tx)
 
 		recipe, err := qtx.UpdateRecipe(r.Context(), db.UpdateRecipeParams{
 			ID:          id,

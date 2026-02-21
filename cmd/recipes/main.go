@@ -66,7 +66,9 @@ func main() {
 	}
 
 	queries := db.New(sqlDB)
-	svc := service.New(queries, sqlDB, dictionaryURL, openaiKey, extractModel)
+	extractor := service.NewOpenAIExtractor(openaiKey, extractModel)
+	resolver := service.NewDictionaryResolver(dictionaryURL)
+	svc := service.New(queries, sqlDB, extractor, resolver)
 	handler := api.NewRouter(svc)
 
 	addr := fmt.Sprintf(":%s", port)
