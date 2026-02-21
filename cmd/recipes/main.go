@@ -45,7 +45,7 @@ func main() {
 
 	extractModel := os.Getenv("EXTRACT_MODEL")
 	if extractModel == "" {
-		extractModel = "gpt-4o-mini"
+		extractModel = "gpt-5-mini"
 	}
 
 	sqlDB, err := sql.Open("postgres", dbURL)
