@@ -13,6 +13,7 @@ woodpantry-recipes
 *.test
 *.out
 coverage.txt
+coverage.html
 
 # Go workspace
 go.work

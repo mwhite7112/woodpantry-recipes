@@ -130,6 +130,22 @@ woodpantry-recipes/
 └── go.sum
 ```
 
+## Testing
+
+```bash
+make test                # Unit tests
+make test-integration    # Integration tests (requires Docker)
+make test-coverage       # Unit tests with coverage
+make generate-mocks      # Regenerate mocks from .mockery.yaml
+make sqlc                # Regenerate sqlc
+```
+
+- Unit tests: `internal/service/` (helpers, DictionaryResolver with httptest), `internal/api/` (list, get, delete, ingest validation, job status)
+- Integration tests: `internal/api/` (full CRUD cycle, list by tag with real Postgres)
+- Mocks: `internal/mocks/` (Querier), `internal/service/` (LLMExtractor, IngredientResolver — in-package to avoid import cycle)
+- Service uses `db.Querier`, `LLMExtractor`, and `IngredientResolver` interfaces for testability
+- Handlers that use `svc.DB().BeginTx()` (create, update, confirm) are covered by integration tests
+
 ## What to Avoid
 
 - Do not store raw ingredient strings in `recipe_ingredients` — always resolve to a Dictionary ID first.

@@ -85,12 +85,21 @@ Respond ONLY with the JSON object. No markdown, no explanation.
 Recipe text:
 `
 
-// ExtractRecipe calls the OpenAI API to parse free text into a StagedRecipe.
-func (s *Service) ExtractRecipe(ctx context.Context, rawText string) (*StagedRecipe, error) {
-	slog.Info("LLM extraction starting", "model", s.extractModel, "input_len", len(rawText))
+// OpenAIExtractor implements LLMExtractor using the OpenAI API.
+type OpenAIExtractor struct {
+	apiKey string
+	model  string
+}
+
+func NewOpenAIExtractor(apiKey, model string) *OpenAIExtractor {
+	return &OpenAIExtractor{apiKey: apiKey, model: model}
+}
+
+func (e *OpenAIExtractor) ExtractRecipe(ctx context.Context, rawText string) (*StagedRecipe, error) {
+	slog.Info("LLM extraction starting", "model", e.model, "input_len", len(rawText))
 
 	reqBody := openAIRequest{
-		Model: s.extractModel,
+		Model: e.model,
 		Messages: []openAIMessage{
 			{Role: "user", Content: extractionPrompt + rawText},
 		},
@@ -110,7 +119,7 @@ func (s *Service) ExtractRecipe(ctx context.Context, rawText string) (*StagedRec
 		return nil, fmt.Errorf("create openai request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.openaiKey)
+	req.Header.Set("Authorization", "Bearer "+e.apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -147,11 +156,19 @@ type resolveResponse struct {
 	} `json:"ingredient"`
 }
 
-// resolveIngredient calls the Dictionary service and returns the canonical ingredient_id.
-func (s *Service) resolveIngredient(ctx context.Context, name string) (uuid.UUID, error) {
+// DictionaryResolver implements IngredientResolver using the Dictionary HTTP API.
+type DictionaryResolver struct {
+	baseURL string
+}
+
+func NewDictionaryResolver(baseURL string) *DictionaryResolver {
+	return &DictionaryResolver{baseURL: baseURL}
+}
+
+func (d *DictionaryResolver) ResolveIngredient(ctx context.Context, name string) (uuid.UUID, error) {
 	body, _ := json.Marshal(map[string]string{"name": name})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		s.dictionaryURL+"/ingredients/resolve",
+		d.baseURL+"/ingredients/resolve",
 		bytes.NewReader(body),
 	)
 	if err != nil {
@@ -199,7 +216,7 @@ func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	qtx := s.q.WithTx(tx)
+	qtx := db.New(tx)
 
 	tags := staged.Tags
 	if tags == nil {
@@ -230,7 +247,7 @@ func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (
 	}
 
 	for _, ing := range staged.Ingredients {
-		ingredientID, err := s.resolveIngredient(ctx, ing.Name)
+		ingredientID, err := s.resolver.ResolveIngredient(ctx, ing.Name)
 		if err != nil {
 			return nil, fmt.Errorf("resolve ingredient %q: %w", ing.Name, err)
 		}
