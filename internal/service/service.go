@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/google/uuid"
+
 	"github.com/mwhite7112/woodpantry-recipes/internal/db"
 )
 
@@ -35,8 +36,8 @@ func New(q db.Querier, sqlDB *sql.DB, extractor LLMExtractor, resolver Ingredien
 	}
 }
 
-func (s *Service) Queries() db.Querier    { return s.q }
-func (s *Service) DB() *sql.DB            { return s.sqlDB }
+func (s *Service) Queries() db.Querier     { return s.q }
+func (s *Service) DB() *sql.DB             { return s.sqlDB }
 func (s *Service) Extractor() LLMExtractor { return s.extractor }
 
 // ExtractRecipe delegates to the configured LLM extractor.

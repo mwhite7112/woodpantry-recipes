@@ -51,7 +51,7 @@ func TestOpenAIExtractor_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	extractor := &OpenAIExtractor{apiKey: "test-key", model: "gpt-test"}
+	extractor := NewOpenAIExtractor("test-key", "gpt-test")
 	// Override the URL by using the test server
 	// Since OpenAIExtractor hardcodes the URL, we test via DictionaryResolver instead
 	// and test ExtractRecipe indirectly through the mock

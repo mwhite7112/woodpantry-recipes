@@ -68,7 +68,7 @@ func TestNullFloat64(t *testing.T) {
 			nf := nullFloat64(tc.input)
 			assert.Equal(t, tc.valid, nf.Valid)
 			if tc.valid {
-				assert.Equal(t, tc.input, nf.Float64)
+				assert.InDelta(t, tc.input, nf.Float64, 0.000001)
 			}
 		})
 	}

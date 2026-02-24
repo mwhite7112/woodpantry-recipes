@@ -140,6 +140,12 @@ make generate-mocks      # Regenerate mocks from .mockery.yaml
 make sqlc                # Regenerate sqlc
 ```
 
+### CI Checks
+
+- `.github/workflows/ci.yaml` runs blocking lint (`.golangci.yaml`)
+- `.github/workflows/ci.yaml` runs advisory lint (`.golangci-advisory.yaml`) as non-blocking
+- `.github/workflows/ci.yaml` runs Docker build, unit tests, and integration tests
+
 - Unit tests: `internal/service/` (helpers, DictionaryResolver with httptest), `internal/api/` (list, get, delete, ingest validation, job status)
 - Integration tests: `internal/api/` (full CRUD cycle, list by tag with real Postgres)
 - Mocks: `internal/mocks/` (Querier), `internal/service/` (LLMExtractor, IngredientResolver — in-package to avoid import cycle)

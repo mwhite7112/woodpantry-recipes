@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+
 	"github.com/mwhite7112/woodpantry-recipes/internal/db"
 	"github.com/mwhite7112/woodpantry-recipes/internal/logging"
 	"github.com/mwhite7112/woodpantry-recipes/internal/service"
@@ -62,9 +64,13 @@ func handleListRecipes(svc *service.Service) http.HandlerFunc {
 				jsonError(w, "invalid cook_time_max", http.StatusBadRequest)
 				return
 			}
-			recipes, err = svc.Queries().ListRecipesByCookTime(r.Context(), sql.NullInt32{Int32: int32(maxCook), Valid: true})
+			recipes, err = svc.Queries().ListRecipesByCookTime(
+				r.Context(),
+				sql.NullInt32{Int32: int32(maxCook), Valid: true},
+			)
 		case titleSearch != "":
-			recipes, err = svc.Queries().ListRecipesByTitle(r.Context(), sql.NullString{String: titleSearch, Valid: true})
+			recipes, err = svc.Queries().
+				ListRecipesByTitle(r.Context(), sql.NullString{String: titleSearch, Valid: true})
 		default:
 			recipes, err = svc.Queries().ListRecipes(r.Context())
 		}
@@ -103,6 +109,7 @@ type recipeInput struct {
 	} `json:"ingredients"`
 }
 
+//nolint:gocognit // Handler coordinates validation + transactional writes across related tables.
 func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req recipeInput
@@ -143,9 +150,14 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 		}
 
 		for _, step := range req.Steps {
+			stepNumber, ok := toInt32(step.StepNumber)
+			if !ok {
+				jsonError(w, "step_number out of range", http.StatusBadRequest)
+				return
+			}
 			if _, err := qtx.CreateStep(r.Context(), db.CreateStepParams{
 				RecipeID:    recipe.ID,
-				StepNumber:  int32(step.StepNumber),
+				StepNumber:  stepNumber,
 				Instruction: step.Instruction,
 			}); err != nil {
 				jsonError(w, "failed to create step", http.StatusInternalServerError, err)
@@ -177,9 +189,7 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(recipe) //nolint:errcheck
+		jsonWithStatus(w, http.StatusCreated, recipe)
 	}
 }
 
@@ -187,6 +197,7 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 
 type recipeDetail struct {
 	db.Recipe
+
 	Steps       []db.RecipeStep       `json:"steps"`
 	Ingredients []db.RecipeIngredient `json:"ingredients"`
 }
@@ -229,6 +240,7 @@ func handleGetRecipe(svc *service.Service) http.HandlerFunc {
 
 // --- update ---
 
+//nolint:gocognit,funlen // Handler coordinates validation + transactional replacement of steps and ingredients.
 func handleUpdateRecipe(svc *service.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -290,9 +302,14 @@ func handleUpdateRecipe(svc *service.Service) http.HandlerFunc {
 			return
 		}
 		for _, step := range req.Steps {
+			stepNumber, ok := toInt32(step.StepNumber)
+			if !ok {
+				jsonError(w, "step_number out of range", http.StatusBadRequest)
+				return
+			}
 			if _, err := qtx.CreateStep(r.Context(), db.CreateStepParams{
 				RecipeID:    id,
-				StepNumber:  int32(step.StepNumber),
+				StepNumber:  stepNumber,
 				Instruction: step.Instruction,
 			}); err != nil {
 				jsonError(w, "failed to update step", http.StatusInternalServerError, err)
@@ -415,9 +432,7 @@ func handleIngest(svc *service.Service) http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(updatedJob) //nolint:errcheck
+		jsonWithStatus(w, http.StatusCreated, updatedJob)
 	}
 }
 
@@ -472,12 +487,16 @@ func handleConfirmIngest(svc *service.Service) http.HandlerFunc {
 			ID:     job.ID,
 			Status: "confirmed",
 		}); err != nil {
-			slog.Error("failed to mark job confirmed (recipe already committed)", "job_id", job.ID, "error", err)
+			slog.Default().Error(
+				"failed to mark job confirmed (recipe already committed)",
+				"job_id",
+				job.ID,
+				"error",
+				err,
+			)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(recipe) //nolint:errcheck
+		jsonWithStatus(w, http.StatusCreated, recipe)
 	}
 }
 
@@ -488,9 +507,15 @@ func jsonOK(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v) //nolint:errcheck
 }
 
+func jsonWithStatus(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v) //nolint:errcheck
+}
+
 func jsonError(w http.ResponseWriter, msg string, status int, errs ...error) {
 	if status >= 500 && len(errs) > 0 {
-		slog.Error(msg, "status", status, "error", errs[0])
+		slog.Default().Error(msg, "status", status, "error", errs[0])
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -502,9 +527,19 @@ func nullString(s string) sql.NullString {
 }
 
 func nullInt32(n int) sql.NullInt32 {
+	if n > math.MaxInt32 || n < math.MinInt32 {
+		return sql.NullInt32{Valid: false}
+	}
 	return sql.NullInt32{Int32: int32(n), Valid: n != 0}
 }
 
 func nullFloat64(f float64) sql.NullFloat64 {
 	return sql.NullFloat64{Float64: f, Valid: f != 0}
+}
+
+func toInt32(n int) (int32, bool) {
+	if n > math.MaxInt32 || n < math.MinInt32 {
+		return 0, false
+	}
+	return int32(n), true
 }
