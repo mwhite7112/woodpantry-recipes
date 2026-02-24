@@ -11,12 +11,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mwhite7112/woodpantry-recipes/internal/db"
-	"github.com/mwhite7112/woodpantry-recipes/internal/mocks"
-	"github.com/mwhite7112/woodpantry-recipes/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mwhite7112/woodpantry-recipes/internal/db"
+	"github.com/mwhite7112/woodpantry-recipes/internal/mocks"
+	"github.com/mwhite7112/woodpantry-recipes/internal/service"
 )
 
 // stubExtractor is a no-op LLM extractor for handler tests.
@@ -74,7 +75,7 @@ func TestListRecipes_Default(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	var got []map[string]interface{}
+	var got []map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.Len(t, got, 1)
 	assert.Equal(t, "Pasta", got[0]["Title"])
@@ -97,7 +98,9 @@ func TestListRecipes_ByCookTime(t *testing.T) {
 	t.Parallel()
 	mockQ, router := setupRouter(t)
 
-	mockQ.EXPECT().ListRecipesByCookTime(mock.Anything, sql.NullInt32{Int32: 30, Valid: true}).Return([]db.Recipe{}, nil)
+	mockQ.EXPECT().
+		ListRecipesByCookTime(mock.Anything, sql.NullInt32{Int32: 30, Valid: true}).
+		Return([]db.Recipe{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/recipes?cook_time_max=30", nil)
 	rec := httptest.NewRecorder()
@@ -121,7 +124,9 @@ func TestListRecipes_ByTitle(t *testing.T) {
 	t.Parallel()
 	mockQ, router := setupRouter(t)
 
-	mockQ.EXPECT().ListRecipesByTitle(mock.Anything, sql.NullString{String: "pasta", Valid: true}).Return([]db.Recipe{}, nil)
+	mockQ.EXPECT().
+		ListRecipesByTitle(mock.Anything, sql.NullString{String: "pasta", Valid: true}).
+		Return([]db.Recipe{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/recipes?title=pasta", nil)
 	rec := httptest.NewRecorder()
@@ -159,7 +164,7 @@ func TestGetRecipe_Success(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	var got map[string]interface{}
+	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.Equal(t, "Pasta Carbonara", got["Title"])
 	assert.Len(t, got["steps"], 1)

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
+
 	"github.com/mwhite7112/woodpantry-recipes/internal/db"
 )
 
@@ -96,7 +98,8 @@ func NewOpenAIExtractor(apiKey, model string) *OpenAIExtractor {
 }
 
 func (e *OpenAIExtractor) ExtractRecipe(ctx context.Context, rawText string) (*StagedRecipe, error) {
-	slog.Info("LLM extraction starting", "model", e.model, "input_len", len(rawText))
+	logger := slog.Default()
+	logger.InfoContext(ctx, "LLM extraction starting", "model", e.model, "input_len", len(rawText))
 
 	reqBody := openAIRequest{
 		Model: e.model,
@@ -137,7 +140,7 @@ func (e *OpenAIExtractor) ExtractRecipe(ctx context.Context, rawText string) (*S
 		return nil, fmt.Errorf("decode openai response: %w", err)
 	}
 	if len(aiResp.Choices) == 0 {
-		return nil, fmt.Errorf("openai returned no choices")
+		return nil, errors.New("openai returned no choices")
 	}
 
 	var staged StagedRecipe
@@ -145,7 +148,16 @@ func (e *OpenAIExtractor) ExtractRecipe(ctx context.Context, rawText string) (*S
 		return nil, fmt.Errorf("parse extracted recipe json: %w", err)
 	}
 
-	slog.Info("LLM extraction complete", "title", staged.Title, "ingredients", len(staged.Ingredients), "steps", len(staged.Steps))
+	logger.InfoContext(
+		ctx,
+		"LLM extraction complete",
+		"title",
+		staged.Title,
+		"ingredients",
+		len(staged.Ingredients),
+		"steps",
+		len(staged.Steps),
+	)
 	return &staged, nil
 }
 
@@ -202,13 +214,23 @@ func (d *DictionaryResolver) ResolveIngredient(ctx context.Context, name string)
 func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (*db.Recipe, error) {
 	var staged StagedRecipe
 	if job.StagedData == nil {
-		return nil, fmt.Errorf("staged data is nil")
+		return nil, errors.New("staged data is nil")
 	}
 	if err := json.Unmarshal(*job.StagedData, &staged); err != nil {
 		return nil, fmt.Errorf("unmarshal staged data: %w", err)
 	}
 
-	slog.Info("committing staged recipe", "job_id", job.ID, "title", staged.Title, "ingredients", len(staged.Ingredients))
+	logger := slog.Default()
+	logger.InfoContext(
+		ctx,
+		"committing staged recipe",
+		"job_id",
+		job.ID,
+		"title",
+		staged.Title,
+		"ingredients",
+		len(staged.Ingredients),
+	)
 
 	tx, err := s.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
@@ -251,7 +273,7 @@ func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (
 		if err != nil {
 			return nil, fmt.Errorf("resolve ingredient %q: %w", ing.Name, err)
 		}
-		slog.Info("resolved ingredient", "name", ing.Name, "ingredient_id", ingredientID)
+		logger.InfoContext(ctx, "resolved ingredient", "name", ing.Name, "ingredient_id", ingredientID)
 		if _, err := qtx.CreateRecipeIngredient(ctx, db.CreateRecipeIngredientParams{
 			RecipeID:         recipe.ID,
 			IngredientID:     ingredientID,
@@ -268,6 +290,6 @@ func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
 
-	slog.Info("recipe committed", "recipe_id", recipe.ID, "title", recipe.Title)
+	logger.InfoContext(ctx, "recipe committed", "recipe_id", recipe.ID, "title", recipe.Title)
 	return &recipe, nil
 }
