@@ -65,19 +65,13 @@ func run() error {
 	queries := db.New(sqlDB)
 	resolver := service.NewDictionaryResolver(dictionaryURL)
 
-	importPublisher, err := setupImportRequestedPublisher(rabbitMQURL)
-	if err != nil {
-		return err
-	}
+	importPublisher := setupImportRequestedPublisher(rabbitMQURL)
 	defer importPublisher.Close()
 
 	svc := service.New(queries, sqlDB, nil, resolver, importPublisher)
 	handler := api.NewRouter(svc)
 
-	importedSubscriber, err := setupRecipeImportedSubscriber(rabbitMQURL, svc)
-	if err != nil {
-		return err
-	}
+	importedSubscriber := setupRecipeImportedSubscriber(rabbitMQURL, svc)
 	defer importedSubscriber.Close()
 
 	if rabbitMQURL != "" {
@@ -104,20 +98,20 @@ type importRequestedPublisher interface {
 	Close() error
 }
 
-func setupImportRequestedPublisher(rabbitMQURL string) (importRequestedPublisher, error) {
+func setupImportRequestedPublisher(rabbitMQURL string) importRequestedPublisher {
 	if rabbitMQURL == "" {
 		slog.Info("RABBITMQ_URL not set; recipe.import.requested publishing disabled")
-		return nopImportRequestedPublisher{}, nil
+		return nopImportRequestedPublisher{}
 	}
 
 	pub, err := events.NewRecipeImportRequestedPublisher(rabbitMQURL)
 	if err != nil {
 		slog.Warn("failed to initialize RabbitMQ publisher; recipe.import.requested publishing disabled", "error", err)
-		return nopImportRequestedPublisher{}, nil
+		return nopImportRequestedPublisher{}
 	}
 
 	slog.Info("RabbitMQ recipe.import.requested publisher enabled")
-	return pub, nil
+	return pub
 }
 
 type nopImportRequestedPublisher struct{}
@@ -141,20 +135,20 @@ type recipeImportedSubscriber interface {
 func setupRecipeImportedSubscriber(
 	rabbitMQURL string,
 	svc events.RecipeImportedEventHandler,
-) (recipeImportedSubscriber, error) {
+) recipeImportedSubscriber {
 	if rabbitMQURL == "" {
 		slog.Info("RABBITMQ_URL not set; recipe.imported subscriber disabled")
-		return nopRecipeImportedSubscriber{}, nil
+		return nopRecipeImportedSubscriber{}
 	}
 
-	sub, err := events.NewRecipeImportedSubscriber(rabbitMQURL, svc)
+	sub, err := events.NewRecipeImportedSubscriber(rabbitMQURL, svc, slog.Default())
 	if err != nil {
 		slog.Warn("failed to initialize recipe.imported subscriber; subscriber disabled", "error", err)
-		return nopRecipeImportedSubscriber{}, nil
+		return nopRecipeImportedSubscriber{}
 	}
 
 	slog.Info("RabbitMQ recipe.imported subscriber enabled")
-	return sub, nil
+	return sub
 }
 
 type nopRecipeImportedSubscriber struct{}

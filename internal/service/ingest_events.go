@@ -39,7 +39,7 @@ func (s *Service) HandleRecipeImportedEvent(ctx context.Context, event events.Re
 			return fmt.Errorf("invalid staged_data payload: %w", err)
 		}
 
-		raw := json.RawMessage(event.StagedData)
+		raw := event.StagedData
 		_, err := s.q.UpdateIngestionJobStaged(ctx, db.UpdateIngestionJobStagedParams{
 			ID:         event.JobID,
 			StagedData: &raw,

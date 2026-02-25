@@ -80,7 +80,7 @@ func TestHandleRecipeImportedEvent_UnknownJob(t *testing.T) {
 
 	jobID := uuid.New()
 	stagedJSON := json.RawMessage(`{"title":"Soup","ingredients":[{"name":"water"}]}`)
-	stagedRaw := json.RawMessage(stagedJSON)
+	stagedRaw := stagedJSON
 	mockQ.EXPECT().UpdateIngestionJobStaged(
 		mock.Anything,
 		db.UpdateIngestionJobStagedParams{

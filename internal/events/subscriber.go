@@ -22,12 +22,18 @@ type RecipeImportedEventHandler interface {
 type RecipeImportedSubscriber struct {
 	conn    *amqp.Connection
 	handler RecipeImportedEventHandler
+	logger  *slog.Logger
 }
 
 func NewRecipeImportedSubscriber(
 	rabbitmqURL string,
 	handler RecipeImportedEventHandler,
+	logger *slog.Logger,
 ) (*RecipeImportedSubscriber, error) {
+	if logger == nil {
+		return nil, errors.New("logger is required")
+	}
+
 	conn, err := amqp.Dial(rabbitmqURL)
 	if err != nil {
 		return nil, fmt.Errorf("connect rabbitmq: %w", err)
@@ -36,6 +42,7 @@ func NewRecipeImportedSubscriber(
 	return &RecipeImportedSubscriber{
 		conn:    conn,
 		handler: handler,
+		logger:  logger,
 	}, nil
 }
 
@@ -92,7 +99,7 @@ func (s *RecipeImportedSubscriber) Run(ctx context.Context) error {
 		return fmt.Errorf("consume %q: %w", recipeImportedQueue, err)
 	}
 
-	slog.Info("recipe.imported subscriber started", "queue", recipeImportedQueue)
+	s.logger.InfoContext(ctx, "recipe.imported subscriber started", "queue", recipeImportedQueue)
 
 	for {
 		select {
@@ -105,25 +112,32 @@ func (s *RecipeImportedSubscriber) Run(ctx context.Context) error {
 
 			var event RecipeImportedEvent
 			if err := json.Unmarshal(msg.Body, &event); err != nil {
-				slog.Error("invalid recipe.imported payload", "error", err)
+				s.logger.ErrorContext(ctx, "invalid recipe.imported payload", "error", err)
 				_ = msg.Ack(false)
 				continue
 			}
 
 			if err := s.handler.HandleRecipeImportedEvent(ctx, event); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
-					slog.Warn("dropping recipe.imported event for unknown job", "job_id", event.JobID)
+					s.logger.WarnContext(ctx, "dropping recipe.imported event for unknown job", "job_id", event.JobID)
 					_ = msg.Ack(false)
 					continue
 				}
 
-				slog.Error("failed to handle recipe.imported event", "job_id", event.JobID, "error", err)
+				s.logger.ErrorContext(
+					ctx,
+					"failed to handle recipe.imported event",
+					"job_id",
+					event.JobID,
+					"error",
+					err,
+				)
 				_ = msg.Nack(false, true)
 				continue
 			}
 
 			if err := msg.Ack(false); err != nil {
-				slog.Error("failed to ack recipe.imported event", "job_id", event.JobID, "error", err)
+				s.logger.ErrorContext(ctx, "failed to ack recipe.imported event", "job_id", event.JobID, "error", err)
 			}
 		}
 	}

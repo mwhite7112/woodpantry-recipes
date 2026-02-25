@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -63,7 +64,7 @@ func (s *Service) Extractor() LLMExtractor { return s.extractor }
 // ExtractRecipe delegates to the configured LLM extractor.
 func (s *Service) ExtractRecipe(ctx context.Context, rawText string) (*StagedRecipe, error) {
 	if s.extractor == nil {
-		return nil, fmt.Errorf("llm extractor is not configured")
+		return nil, errors.New("llm extractor is not configured")
 	}
 
 	return s.extractor.ExtractRecipe(ctx, rawText)
