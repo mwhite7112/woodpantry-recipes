@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/mwhite7112/woodpantry-recipes/internal/api"
 	"github.com/mwhite7112/woodpantry-recipes/internal/db"
+	"github.com/mwhite7112/woodpantry-recipes/internal/events"
 	"github.com/mwhite7112/woodpantry-recipes/internal/logging"
 	"github.com/mwhite7112/woodpantry-recipes/internal/service"
 )
@@ -44,15 +46,7 @@ func run() error {
 		return errors.New("DICTIONARY_URL is required")
 	}
 
-	openaiKey := os.Getenv("OPENAI_API_KEY")
-	if openaiKey == "" {
-		return errors.New("OPENAI_API_KEY is required")
-	}
-
-	extractModel := os.Getenv("EXTRACT_MODEL")
-	if extractModel == "" {
-		extractModel = "gpt-5-mini"
-	}
+	rabbitMQURL := os.Getenv("RABBITMQ_URL")
 
 	sqlDB, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -69,10 +63,26 @@ func run() error {
 	}
 
 	queries := db.New(sqlDB)
-	extractor := service.NewOpenAIExtractor(openaiKey, extractModel)
 	resolver := service.NewDictionaryResolver(dictionaryURL)
-	svc := service.New(queries, sqlDB, extractor, resolver)
+
+	importPublisher := setupImportRequestedPublisher(rabbitMQURL)
+	defer importPublisher.Close()
+
+	svc := service.New(queries, sqlDB, nil, resolver, importPublisher)
 	handler := api.NewRouter(svc)
+
+	importedSubscriber := setupRecipeImportedSubscriber(rabbitMQURL, svc)
+	defer importedSubscriber.Close()
+
+	if rabbitMQURL != "" {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			if err := importedSubscriber.Run(ctx); err != nil {
+				slog.Error("recipe.imported subscriber stopped", "error", err)
+			}
+		}()
+	}
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("recipes service listening", "addr", addr)
@@ -80,6 +90,74 @@ func run() error {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}
 
+	return nil
+}
+
+type importRequestedPublisher interface {
+	service.ImportRequestPublisher
+	Close() error
+}
+
+func setupImportRequestedPublisher(rabbitMQURL string) importRequestedPublisher {
+	if rabbitMQURL == "" {
+		slog.Info("RABBITMQ_URL not set; recipe.import.requested publishing disabled")
+		return nopImportRequestedPublisher{}
+	}
+
+	pub, err := events.NewRecipeImportRequestedPublisher(rabbitMQURL)
+	if err != nil {
+		slog.Warn("failed to initialize RabbitMQ publisher; recipe.import.requested publishing disabled", "error", err)
+		return nopImportRequestedPublisher{}
+	}
+
+	slog.Info("RabbitMQ recipe.import.requested publisher enabled")
+	return pub
+}
+
+type nopImportRequestedPublisher struct{}
+
+func (nopImportRequestedPublisher) PublishRecipeImportRequested(
+	_ context.Context,
+	_ events.RecipeImportRequestedEvent,
+) error {
+	return nil
+}
+
+func (nopImportRequestedPublisher) Close() error {
+	return nil
+}
+
+type recipeImportedSubscriber interface {
+	Run(ctx context.Context) error
+	Close() error
+}
+
+func setupRecipeImportedSubscriber(
+	rabbitMQURL string,
+	svc events.RecipeImportedEventHandler,
+) recipeImportedSubscriber {
+	if rabbitMQURL == "" {
+		slog.Info("RABBITMQ_URL not set; recipe.imported subscriber disabled")
+		return nopRecipeImportedSubscriber{}
+	}
+
+	sub, err := events.NewRecipeImportedSubscriber(rabbitMQURL, svc, slog.Default())
+	if err != nil {
+		slog.Warn("failed to initialize recipe.imported subscriber; subscriber disabled", "error", err)
+		return nopRecipeImportedSubscriber{}
+	}
+
+	slog.Info("RabbitMQ recipe.imported subscriber enabled")
+	return sub
+}
+
+type nopRecipeImportedSubscriber struct{}
+
+func (nopRecipeImportedSubscriber) Run(_ context.Context) error {
+	return nil
+}
+
+func (nopRecipeImportedSubscriber) Close() error {
 	return nil
 }
 

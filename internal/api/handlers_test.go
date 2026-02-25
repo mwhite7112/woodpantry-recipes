@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mwhite7112/woodpantry-recipes/internal/db"
+	"github.com/mwhite7112/woodpantry-recipes/internal/events"
 	"github.com/mwhite7112/woodpantry-recipes/internal/mocks"
 	"github.com/mwhite7112/woodpantry-recipes/internal/service"
 )
@@ -32,6 +33,18 @@ type stubResolver struct{}
 
 func (s *stubResolver) ResolveIngredient(_ context.Context, _ string) (uuid.UUID, error) {
 	return uuid.New(), nil
+}
+
+type stubImportPublisher struct {
+	event *events.RecipeImportRequestedEvent
+}
+
+func (p *stubImportPublisher) PublishRecipeImportRequested(
+	_ context.Context,
+	event events.RecipeImportRequestedEvent,
+) error {
+	p.event = &event
+	return nil
 }
 
 func setupRouter(t *testing.T) (*mocks.MockQuerier, http.Handler) {
@@ -274,6 +287,38 @@ func TestPostIngest_MissingText(t *testing.T) {
 	var errBody map[string]string
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &errBody))
 	assert.Contains(t, errBody["error"], "text is required")
+}
+
+func TestPostIngest_QueuesJob(t *testing.T) {
+	t.Parallel()
+
+	mockQ := mocks.NewMockQuerier(t)
+	publisher := &stubImportPublisher{}
+	svc := service.New(mockQ, nil, &stubExtractor{}, &stubResolver{}, publisher)
+	router := NewRouter(svc)
+
+	jobID := uuid.New()
+	now := time.Now()
+	mockQ.EXPECT().CreateIngestionJob(mock.Anything, db.CreateIngestionJobParams{
+		Type:     "text_blob",
+		RawInput: "some recipe text",
+	}).Return(db.IngestionJob{
+		ID:        jobID,
+		Type:      "text_blob",
+		RawInput:  "some recipe text",
+		Status:    "pending",
+		CreatedAt: now,
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/recipes/ingest", strings.NewReader(`{"text":"some recipe text"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	require.NotNil(t, publisher.event)
+	assert.Equal(t, jobID, publisher.event.JobID)
+	assert.Equal(t, "some recipe text", publisher.event.RawInput)
 }
 
 func TestPostIngest_InvalidBody(t *testing.T) {
