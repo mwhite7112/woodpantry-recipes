@@ -1,6 +1,6 @@
 # woodpantry-recipes
 
-Recipe Service for WoodPantry. Owns the recipe corpus — CRUD, free-text LLM ingest, and semantic search. All recipe ingredients are normalized against the Ingredient Dictionary.
+Recipe Service for WoodPantry. Owns the recipe corpus and staged recipe ingest review flow. In Phase 2, extraction is async through RabbitMQ (Ingestion Pipeline), not direct OpenAI calls from this service.
 
 ## Endpoints
 
@@ -12,40 +12,39 @@ Recipe Service for WoodPantry. Owns the recipe corpus — CRUD, free-text LLM in
 | GET | `/recipes/:id` | Full recipe detail |
 | PUT | `/recipes/:id` | Update recipe |
 | DELETE | `/recipes/:id` | Delete recipe |
-| POST | `/recipes/ingest` | Submit free text or URL for async LLM extraction |
+| POST | `/recipes/ingest` | Submit free text for async extraction (publishes `recipe.import.requested`) |
 | GET | `/recipes/ingest/:job_id` | Check ingest status / get staged recipe for review |
 | POST | `/recipes/ingest/:job_id/confirm` | Commit staged recipe after review |
 | POST | `/recipes/search` | Semantic search via natural language prompt (Phase 3) |
 
 ### POST /recipes/ingest
 
-Accepts a free-text recipe body (as you'd write it in a notes app) or a URL. Triggers LLM extraction and returns a job ID for polling.
+Accepts free-text recipe input, creates an `ingestion_jobs` row, and publishes `recipe.import.requested`. Returns immediately with a job ID for polling.
 
 ```json
 // Request
-{
-  "type": "text_blob",
-  "content": "Weeknight Pasta\n\nIngredients:\n- 2 cloves garlic\n- 1 lb pasta\n- olive oil, salt\n\nInstructions:\n1. Boil pasta. 2. Sauté garlic in oil. 3. Combine."
-}
+{ "text": "Weeknight Pasta\n\nIngredients:\n- 2 cloves garlic\n- 1 lb pasta\n- olive oil, salt\n\nInstructions:\n1. Boil pasta. 2. Saute garlic in oil. 3. Combine." }
 
 // Response
-{ "job_id": "uuid", "status": "pending" }
+{ "ID": "uuid", "Status": "pending" }
 ```
 
 ### GET /recipes/ingest/:job_id
 
-Returns the staged recipe when extraction is complete. Review this before confirming.
+Returns the persisted `ingestion_jobs` record. When the ingestion worker publishes `recipe.imported`, this job is updated to `staged` with `staged_data`.
 
 ```json
 {
-  "job_id": "uuid",
-  "status": "staged",
-  "recipe": {
+  "ID": "uuid",
+  "Type": "text_blob",
+  "RawInput": "Weeknight Pasta...",
+  "Status": "staged",
+  "StagedData": {
     "title": "Weeknight Pasta",
     "ingredients": [
-      { "raw_text": "garlic", "ingredient_id": "uuid", "quantity": 2, "unit": "clove" }
+      { "name": "garlic", "ingredient_id": "uuid", "quantity": 2, "unit": "clove" }
     ],
-    "steps": ["Boil pasta.", "Sauté garlic in oil.", "Combine."]
+    "steps": ["Boil pasta.", "Saute garlic in oil.", "Combine."]
   }
 }
 ```
@@ -61,13 +60,17 @@ Returns the staged recipe when extraction is complete. Review this before confir
 
 ```
 POST /recipes/ingest
-  → LLM extracts structured recipe
-  → Each ingredient resolved via POST /ingredients/resolve
-  → Staged as IngestionJob
+  → Create ingestion job (pending)
+  → Publish recipe.import.requested
+Ingestion Pipeline (async)
+  → Extract + normalize recipe payload
+  → Publish recipe.imported {job_id, status, staged_data}
+Recipe Service subscriber
+  → Update ingestion job to staged (or failed)
 GET /recipes/ingest/:job_id     ← user reviews staged recipe
 POST /recipes/ingest/:job_id/confirm
   → Recipe committed to DB
-  → Embedding generated in background (Phase 3)
+  → Ingredients resolved if needed (fallback when ingredient_id absent)
 ```
 
 ## Configuration
@@ -77,10 +80,7 @@ POST /recipes/ingest/:job_id/confirm
 | `PORT` | `8080` | HTTP listen port |
 | `DB_URL` | required | PostgreSQL `recipe_db` connection string |
 | `DICTIONARY_URL` | required | Ingredient Dictionary service base URL |
-| `OPENAI_API_KEY` | required | OpenAI API key (extraction + embeddings) |
-| `EXTRACT_MODEL` | `gpt-5-mini` | OpenAI model for text extraction |
-| `EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model (Phase 3) |
-| `RABBITMQ_URL` | optional | Enables async queue-based ingest (Phase 2+) |
+| `RABBITMQ_URL` | optional | Enables publish/subscribe for async ingest (Phase 2+) |
 | `LOG_LEVEL` | `info` | Log level |
 
 ## Development
@@ -97,8 +97,7 @@ POST /recipes/ingest/:job_id/confirm
 ```bash
 export DB_URL="postgres://user:pass@localhost:5432/recipe_db?sslmode=disable"
 export DICTIONARY_URL="http://localhost:8081"
-export OPENAI_API_KEY="sk-..."
-export EXTRACT_MODEL="gpt-4o-mini"
+export RABBITMQ_URL="amqp://guest:guest@localhost:5672/"
 export LOG_LEVEL=debug
 ```
 

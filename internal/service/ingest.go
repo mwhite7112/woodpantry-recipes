@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 
@@ -17,6 +16,7 @@ import (
 
 // StagedIngredient is an ingredient as extracted by LLM before resolve.
 type StagedIngredient struct {
+	IngredientID     string  `json:"ingredient_id,omitempty"`
 	Name             string  `json:"name"`
 	Quantity         float64 `json:"quantity,omitempty"`
 	Unit             string  `json:"unit,omitempty"`
@@ -35,130 +35,6 @@ type StagedRecipe struct {
 	Tags        []string           `json:"tags,omitempty"`
 	Steps       []string           `json:"steps,omitempty"`
 	Ingredients []StagedIngredient `json:"ingredients"`
-}
-
-// openAIMessage is a chat message for the OpenAI API.
-type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// openAIRequest is a chat completion request body.
-type openAIRequest struct {
-	Model          string          `json:"model"`
-	Messages       []openAIMessage `json:"messages"`
-	ResponseFormat struct {
-		Type string `json:"type"`
-	} `json:"response_format"`
-}
-
-// openAIResponse is the chat completion response.
-type openAIResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-}
-
-const extractionPrompt = `Extract the recipe from the following text into a JSON object with this exact schema:
-{
-  "title": "string",
-  "description": "string (optional)",
-  "source_url": "string (optional)",
-  "servings": number (optional),
-  "prep_minutes": number (optional),
-  "cook_minutes": number (optional),
-  "tags": ["string"] (e.g. ["dinner","vegetarian"]),
-  "steps": ["string (each step as one instruction)"],
-  "ingredients": [
-    {
-      "name": "string (ingredient name only, no quantity)",
-      "quantity": number (optional),
-      "unit": "string (e.g. cup, tbsp, g — optional)",
-      "is_optional": boolean (default false),
-      "preparation_notes": "string (e.g. finely chopped — optional)"
-    }
-  ]
-}
-
-Respond ONLY with the JSON object. No markdown, no explanation.
-
-Recipe text:
-`
-
-// OpenAIExtractor implements LLMExtractor using the OpenAI API.
-type OpenAIExtractor struct {
-	apiKey string
-	model  string
-}
-
-func NewOpenAIExtractor(apiKey, model string) *OpenAIExtractor {
-	return &OpenAIExtractor{apiKey: apiKey, model: model}
-}
-
-func (e *OpenAIExtractor) ExtractRecipe(ctx context.Context, rawText string) (*StagedRecipe, error) {
-	logger := slog.Default()
-	logger.InfoContext(ctx, "LLM extraction starting", "model", e.model, "input_len", len(rawText))
-
-	reqBody := openAIRequest{
-		Model: e.model,
-		Messages: []openAIMessage{
-			{Role: "user", Content: extractionPrompt + rawText},
-		},
-	}
-	reqBody.ResponseFormat.Type = "json_object"
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal openai request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.openai.com/v1/chat/completions",
-		bytes.NewReader(bodyBytes),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create openai request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+e.apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("openai request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openai returned status %d: %s", resp.StatusCode, string(raw))
-	}
-
-	var aiResp openAIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&aiResp); err != nil {
-		return nil, fmt.Errorf("decode openai response: %w", err)
-	}
-	if len(aiResp.Choices) == 0 {
-		return nil, errors.New("openai returned no choices")
-	}
-
-	var staged StagedRecipe
-	if err := json.Unmarshal([]byte(aiResp.Choices[0].Message.Content), &staged); err != nil {
-		return nil, fmt.Errorf("parse extracted recipe json: %w", err)
-	}
-
-	logger.InfoContext(
-		ctx,
-		"LLM extraction complete",
-		"title",
-		staged.Title,
-		"ingredients",
-		len(staged.Ingredients),
-		"steps",
-		len(staged.Steps),
-	)
-	return &staged, nil
 }
 
 // resolveResponse is the response body from POST /ingredients/resolve.
@@ -269,10 +145,23 @@ func (s *Service) CommitStagedRecipe(ctx context.Context, job db.IngestionJob) (
 	}
 
 	for _, ing := range staged.Ingredients {
-		ingredientID, err := s.resolver.ResolveIngredient(ctx, ing.Name)
-		if err != nil {
-			return nil, fmt.Errorf("resolve ingredient %q: %w", ing.Name, err)
+		var ingredientID uuid.UUID
+		if ing.IngredientID != "" {
+			ingredientID, err = uuid.Parse(ing.IngredientID)
+			if err != nil {
+				return nil, fmt.Errorf("parse ingredient_id %q: %w", ing.IngredientID, err)
+			}
+		} else {
+			if s.resolver == nil {
+				return nil, errors.New("ingredient resolver is not configured")
+			}
+
+			ingredientID, err = s.resolver.ResolveIngredient(ctx, ing.Name)
+			if err != nil {
+				return nil, fmt.Errorf("resolve ingredient %q: %w", ing.Name, err)
+			}
 		}
+
 		logger.InfoContext(ctx, "resolved ingredient", "name", ing.Name, "ingredient_id", ingredientID)
 		if _, err := qtx.CreateRecipeIngredient(ctx, db.CreateRecipeIngredientParams{
 			RecipeID:         recipe.ID,

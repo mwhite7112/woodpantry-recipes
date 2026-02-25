@@ -397,42 +397,16 @@ func handleIngest(svc *service.Service) http.HandlerFunc {
 			return
 		}
 
-		// Mark processing and run LLM extraction synchronously (Phase 1).
-		if _, err := svc.Queries().UpdateIngestionJobStatus(r.Context(), db.UpdateIngestionJobStatusParams{
-			ID:     job.ID,
-			Status: "processing",
-		}); err != nil {
-			jsonError(w, "failed to update job status", http.StatusInternalServerError, err)
-			return
-		}
-
-		staged, err := svc.ExtractRecipe(r.Context(), req.Text)
-		if err != nil {
+		if err := svc.PublishRecipeImportRequested(r.Context(), job); err != nil {
 			svc.Queries().UpdateIngestionJobStatus(r.Context(), db.UpdateIngestionJobStatusParams{ //nolint:errcheck
 				ID:     job.ID,
 				Status: "failed",
 			})
-			jsonError(w, "extraction failed: "+err.Error(), http.StatusInternalServerError, err)
+			jsonError(w, "failed to enqueue recipe import", http.StatusInternalServerError, err)
 			return
 		}
 
-		stagedJSON, err := json.Marshal(staged)
-		if err != nil {
-			jsonError(w, "failed to serialize staged recipe", http.StatusInternalServerError, err)
-			return
-		}
-
-		stagedRaw := json.RawMessage(stagedJSON)
-		updatedJob, err := svc.Queries().UpdateIngestionJobStaged(r.Context(), db.UpdateIngestionJobStagedParams{
-			ID:         job.ID,
-			StagedData: &stagedRaw,
-		})
-		if err != nil {
-			jsonError(w, "failed to stage recipe", http.StatusInternalServerError, err)
-			return
-		}
-
-		jsonWithStatus(w, http.StatusCreated, updatedJob)
+		jsonWithStatus(w, http.StatusCreated, job)
 	}
 }
 
