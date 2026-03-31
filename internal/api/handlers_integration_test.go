@@ -139,8 +139,51 @@ func TestIntegration_CRUDCycle(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-// NOTE: TestIntegration_ListByTag is skipped — the ListRecipesByTag SQL query
-// uses "$1 = ANY(tags)" but the handler passes pq.Array([]string{tag}) which
-// sends an array literal instead of a scalar. This is a pre-existing query bug
-// (the SQL should use "tags @> $1" for array-contains semantics).
-// TODO: fix the query in recipes.sql and regenerate sqlc.
+func TestIntegration_ListByTag(t *testing.T) {
+	router := setupIntegrationRouter(t)
+
+	// Create two recipes with different tags.
+	createBody1 := `{
+		"title": "Vegan Salad",
+		"tags": ["vegan", "healthy"],
+		"steps": [],
+		"ingredients": []
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/recipes", strings.NewReader(createBody1))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	createBody2 := `{
+		"title": "Meat Stew",
+		"tags": ["comfort", "meat"],
+		"steps": [],
+		"ingredients": []
+	}`
+	req = httptest.NewRequest(http.MethodPost, "/recipes", strings.NewReader(createBody2))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// List by tag "vegan".
+	req = httptest.NewRequest(http.MethodGet, "/recipes?tag=vegan", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var list []map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	assert.Len(t, list, 1)
+	assert.Equal(t, "Vegan Salad", list[0]["Title"])
+
+	// List by tag "nonexistent".
+	req = httptest.NewRequest(http.MethodGet, "/recipes?tag=nonexistent", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	assert.Empty(t, list)
+}
