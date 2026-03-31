@@ -171,7 +171,7 @@ func (q *Queries) ListRecipesByCookTime(ctx context.Context, cookMinutes sql.Nul
 const listRecipesByTag = `-- name: ListRecipesByTag :many
 SELECT id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
 FROM recipes
-WHERE $1 = ANY(tags)
+WHERE tags @> $1
 ORDER BY created_at DESC
 `
 

@@ -25,7 +25,7 @@ DELETE FROM recipes WHERE id = $1;
 -- name: ListRecipesByTag :many
 SELECT id, title, description, source_url, servings, prep_minutes, cook_minutes, tags, created_at, updated_at
 FROM recipes
-WHERE $1 = ANY(tags)
+WHERE tags @> $1
 ORDER BY created_at DESC;
 
 -- name: ListRecipesByCookTime :many
