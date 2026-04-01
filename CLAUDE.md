@@ -4,7 +4,7 @@
 
 Owns the recipe corpus. Responsible for CRUD on hand-crafted recipes, staged free-text ingest review, and semantic search via pgvector embeddings. This service is the source of truth for what recipes exist in the system.
 
-During ingest, every recipe ingredient is resolved through the Ingredient Dictionary via `POST /ingredients/resolve` before being stored — ensuring all recipe ingredients reference canonical Dictionary IDs, never raw strings.
+During ingest, and during structured create when `ingredient_id` is omitted, every recipe ingredient is resolved through the Ingredient Dictionary via `POST /ingredients/resolve` before being stored — ensuring all recipe ingredients reference canonical Dictionary IDs, never raw strings.
 
 All ingest flows follow the **staged commit pattern**: free text in → async extraction via Ingestion Pipeline → staged result for review → user confirms → structured recipe committed.
 
@@ -44,7 +44,7 @@ All ingest flows follow the **staged commit pattern**: free text in → async ex
 `POST /recipes/ingest` does not immediately create a recipe. It creates an `IngestionJob` with status `pending` and publishes `recipe.import.requested`. The Ingestion Pipeline later publishes `recipe.imported`, and the local subscriber updates the job to `staged` (or `failed`). The user reviews via `GET /recipes/ingest/:job_id` and confirms via the confirm endpoint. Only then is the recipe committed.
 
 ### Write-Through to Dictionary
-At confirm time, ingredients are persisted as canonical IDs. If `ingredient_id` is already present in staged data (resolved by Ingestion Pipeline), it is used directly. Otherwise, fallback resolution calls `POST /ingredients/resolve` by name.
+At confirm time, and on direct structured create when needed, ingredients are persisted as canonical IDs. If `ingredient_id` is already present, it is used directly. Otherwise, fallback resolution calls `POST /ingredients/resolve` by name.
 
 ### Embeddings (Phase 3)
 After a recipe is committed, a background goroutine generates an embedding via the OpenAI API and stores it in the `embedding` column. The recipe is fully usable before the embedding is ready. `POST /recipes/search` uses pgvector cosine similarity to rank results.
@@ -152,7 +152,7 @@ make sqlc                # Regenerate sqlc
 
 ## What to Avoid
 
-- Do not store raw ingredient strings in `recipe_ingredients` — always resolve to a Dictionary ID first.
+- Do not store raw ingredient strings in `recipe_ingredients` — always resolve to a Dictionary ID first, including direct structured creates that provide only `name`.
 - Do not skip the staged review step — the LLM makes mistakes and users need to verify.
 - Do not re-introduce direct extraction calls in this service during Phase 2+.
 - Do not block recipe creation on embedding generation — embeddings are generated asynchronously.

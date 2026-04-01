@@ -61,6 +61,14 @@ func (s *Service) Queries() db.Querier     { return s.q }
 func (s *Service) DB() *sql.DB             { return s.sqlDB }
 func (s *Service) Extractor() LLMExtractor { return s.extractor }
 
+func (s *Service) ResolveIngredient(ctx context.Context, name string) (uuid.UUID, error) {
+	if s.resolver == nil {
+		return uuid.UUID{}, errors.New("ingredient resolver is not configured")
+	}
+
+	return s.resolver.ResolveIngredient(ctx, name)
+}
+
 // ExtractRecipe delegates to the configured LLM extractor.
 func (s *Service) ExtractRecipe(ctx context.Context, rawText string) (*StagedRecipe, error) {
 	if s.extractor == nil {
