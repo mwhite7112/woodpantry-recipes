@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,16 +33,33 @@ func (r *stubResolverIntegration) ResolveIngredient(_ context.Context, _ string)
 	return uuid.New(), nil
 }
 
-func setupIntegrationRouter(t *testing.T) http.Handler {
+type trackingResolverIntegration struct {
+	resolvedID uuid.UUID
+	names      []string
+	err        error
+}
+
+func (r *trackingResolverIntegration) ResolveIngredient(_ context.Context, name string) (uuid.UUID, error) {
+	r.names = append(r.names, name)
+	if r.err != nil {
+		return uuid.UUID{}, r.err
+	}
+	return r.resolvedID, nil
+}
+
+func setupIntegrationRouter(t *testing.T, resolver service.IngredientResolver) http.Handler {
 	t.Helper()
 	sqlDB := testutil.SetupDB(t)
 	q := db.New(sqlDB)
-	svc := service.New(q, sqlDB, &stubExtractorIntegration{}, &stubResolverIntegration{})
+	if resolver == nil {
+		resolver = &stubResolverIntegration{}
+	}
+	svc := service.New(q, sqlDB, &stubExtractorIntegration{}, resolver)
 	return NewRouter(svc)
 }
 
 func TestIntegration_CRUDCycle(t *testing.T) {
-	router := setupIntegrationRouter(t)
+	router := setupIntegrationRouter(t, nil)
 
 	ingredientID := uuid.New()
 
@@ -140,7 +158,7 @@ func TestIntegration_CRUDCycle(t *testing.T) {
 }
 
 func TestIntegration_ListByTag(t *testing.T) {
-	router := setupIntegrationRouter(t)
+	router := setupIntegrationRouter(t, nil)
 
 	// Create two recipes with different tags.
 	createBody1 := `{
@@ -186,4 +204,95 @@ func TestIntegration_ListByTag(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
 	assert.Empty(t, list)
+}
+
+func TestIntegration_CreateRecipe_PreservesProvidedIngredientID(t *testing.T) {
+	resolver := &trackingResolverIntegration{resolvedID: uuid.New()}
+	router := setupIntegrationRouter(t, resolver)
+	ingredientID := uuid.New()
+
+	body := `{
+		"title": "Structured ID Create",
+		"steps": [{"step_number": 1, "instruction": "Mix"}],
+		"ingredients": [
+			{"ingredient_id": "` + ingredientID.String() + `", "name": "flour", "quantity": 1, "unit": "cup"}
+		]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/recipes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	assert.Empty(t, resolver.names)
+
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	recipeID := created["ID"].(string)
+
+	req = httptest.NewRequest(http.MethodGet, "/recipes/"+recipeID, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var detail recipeDetail
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &detail))
+	require.Len(t, detail.Ingredients, 1)
+	assert.Equal(t, ingredientID, detail.Ingredients[0].IngredientID)
+}
+
+func TestIntegration_CreateRecipe_ResolvesIngredientNameWhenIDAbsent(t *testing.T) {
+	resolvedID := uuid.New()
+	resolver := &trackingResolverIntegration{resolvedID: resolvedID}
+	router := setupIntegrationRouter(t, resolver)
+
+	body := `{
+		"title": "Structured Name Create",
+		"steps": [{"step_number": 1, "instruction": "Mix"}],
+		"ingredients": [
+			{"name": "flour", "quantity": 1, "unit": "cup"}
+		]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/recipes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	require.Equal(t, []string{"flour"}, resolver.names)
+
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	recipeID := created["ID"].(string)
+
+	req = httptest.NewRequest(http.MethodGet, "/recipes/"+recipeID, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var detail recipeDetail
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &detail))
+	require.Len(t, detail.Ingredients, 1)
+	assert.Equal(t, resolvedID, detail.Ingredients[0].IngredientID)
+}
+
+func TestIntegration_CreateRecipe_ReturnsServerErrorWhenIngredientResolveFails(t *testing.T) {
+	resolver := &trackingResolverIntegration{err: errors.New("dictionary unavailable")}
+	router := setupIntegrationRouter(t, resolver)
+
+	body := `{
+		"title": "Structured Resolve Failure",
+		"steps": [{"step_number": 1, "instruction": "Mix"}],
+		"ingredients": [
+			{"name": "flour", "quantity": 1, "unit": "cup"}
+		]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/recipes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.JSONEq(t, `{"error":"failed to resolve ingredient"}`, rec.Body.String())
+	assert.Equal(t, []string{"flour"}, resolver.names)
 }

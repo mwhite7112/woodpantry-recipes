@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -102,6 +104,7 @@ type recipeInput struct {
 	} `json:"steps"`
 	Ingredients []struct {
 		IngredientID     string  `json:"ingredient_id"`
+		Name             string  `json:"name"`
 		Quantity         float64 `json:"quantity"`
 		Unit             string  `json:"unit"`
 		IsOptional       bool    `json:"is_optional"`
@@ -166,9 +169,14 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 		}
 
 		for _, ing := range req.Ingredients {
-			ingID, err := uuid.Parse(ing.IngredientID)
+			ingID, err := resolveRecipeIngredientID(r.Context(), svc, ing.IngredientID, ing.Name)
 			if err != nil {
-				jsonError(w, "invalid ingredient_id: "+ing.IngredientID, http.StatusBadRequest)
+				var badInputErr ingredientResolutionInputError
+				if errors.As(err, &badInputErr) {
+					jsonError(w, badInputErr.Error(), http.StatusBadRequest)
+					return
+				}
+				jsonError(w, "failed to resolve ingredient", http.StatusInternalServerError, err)
 				return
 			}
 			if _, err := qtx.CreateRecipeIngredient(r.Context(), db.CreateRecipeIngredientParams{
@@ -516,4 +524,41 @@ func toInt32(n int) (int32, bool) {
 		return 0, false
 	}
 	return int32(n), true
+}
+
+type ingredientResolutionInputError struct {
+	message string
+}
+
+func (e ingredientResolutionInputError) Error() string {
+	return e.message
+}
+
+func resolveRecipeIngredientID(
+	ctx context.Context,
+	svc *service.Service,
+	ingredientID string,
+	name string,
+) (uuid.UUID, error) {
+	if ingredientID != "" {
+		id, err := uuid.Parse(ingredientID)
+		if err != nil {
+			return uuid.UUID{}, ingredientResolutionInputError{message: "invalid ingredient_id: " + ingredientID}
+		}
+		return id, nil
+	}
+
+	trimmedName := strings.TrimSpace(name)
+	if trimmedName == "" {
+		return uuid.UUID{}, ingredientResolutionInputError{
+			message: "ingredient name is required when ingredient_id is absent",
+		}
+	}
+
+	id, err := svc.ResolveIngredient(ctx, trimmedName)
+	if err != nil {
+		return uuid.UUID{}, err
+	}
+
+	return id, nil
 }

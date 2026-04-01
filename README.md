@@ -56,6 +56,23 @@ Returns the persisted `ingestion_jobs` record. When the ingestion worker publish
 { "prompt": "something warming and Italian, under 45 minutes" }
 ```
 
+### POST /recipes
+
+Creates a recipe from structured JSON. Each ingredient may provide either a canonical `ingredient_id` or a `name`. When `ingredient_id` is omitted, the service resolves `name` through the Ingredient Dictionary before persisting the recipe ingredient row.
+
+```json
+{
+  "title": "Pancakes",
+  "ingredients": [
+    { "ingredient_id": "uuid", "quantity": 2, "unit": "cup" },
+    { "name": "milk", "quantity": 1.5, "unit": "cup" }
+  ],
+  "steps": [
+    { "step_number": 1, "instruction": "Whisk and cook." }
+  ]
+}
+```
+
 ## Ingest Flow
 
 ```
