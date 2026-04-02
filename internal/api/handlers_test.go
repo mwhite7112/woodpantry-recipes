@@ -74,8 +74,20 @@ func TestListRecipes_Default(t *testing.T) {
 	now := time.Now()
 	recipes := []db.Recipe{
 		{
-			ID:        uuid.New(),
-			Title:     "Pasta",
+			ID:    uuid.New(),
+			Title: "Pasta",
+			Description: sql.NullString{
+				String: "Simple pasta",
+				Valid:  true,
+			},
+			SourceUrl: sql.NullString{
+				String: "https://example.com/pasta",
+				Valid:  true,
+			},
+			Servings: sql.NullInt32{
+				Int32: 2,
+				Valid: true,
+			},
 			Tags:      []string{"dinner"},
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -91,7 +103,14 @@ func TestListRecipes_Default(t *testing.T) {
 	var got []map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.Len(t, got, 1)
-	assert.Equal(t, "Pasta", got[0]["Title"])
+	assert.Equal(t, "Pasta", got[0]["title"])
+	assert.Equal(t, "Simple pasta", got[0]["description"])
+	assert.Equal(t, "https://example.com/pasta", got[0]["source_url"])
+	servings, ok := got[0]["servings"].(float64)
+	require.True(t, ok)
+	assert.Equal(t, 2, int(servings))
+	assert.Equal(t, now.Format(time.RFC3339Nano), got[0]["created_at"])
+	assert.NotContains(t, got[0], "Title")
 }
 
 func TestListRecipes_ByTag(t *testing.T) {
@@ -155,8 +174,28 @@ func TestGetRecipe_Success(t *testing.T) {
 	id := uuid.New()
 	now := time.Now()
 	recipe := db.Recipe{
-		ID:        id,
-		Title:     "Pasta Carbonara",
+		ID:    id,
+		Title: "Pasta Carbonara",
+		Description: sql.NullString{
+			String: "Classic Italian pasta",
+			Valid:  true,
+		},
+		SourceUrl: sql.NullString{
+			String: "https://example.com/carbonara",
+			Valid:  true,
+		},
+		Servings: sql.NullInt32{
+			Int32: 4,
+			Valid: true,
+		},
+		PrepMinutes: sql.NullInt32{
+			Int32: 10,
+			Valid: true,
+		},
+		CookMinutes: sql.NullInt32{
+			Int32: 20,
+			Valid: true,
+		},
 		Tags:      []string{"dinner"},
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -165,7 +204,19 @@ func TestGetRecipe_Success(t *testing.T) {
 		{ID: uuid.New(), RecipeID: id, StepNumber: 1, Instruction: "Boil pasta"},
 	}
 	ingredients := []db.RecipeIngredient{
-		{ID: uuid.New(), RecipeID: id, IngredientID: uuid.New()},
+		{
+			ID:           uuid.New(),
+			RecipeID:     id,
+			IngredientID: uuid.New(),
+			Quantity: sql.NullFloat64{
+				Float64: 400,
+				Valid:   true,
+			},
+			Unit: sql.NullString{
+				String: "g",
+				Valid:  true,
+			},
+		},
 	}
 
 	mockQ.EXPECT().GetRecipe(mock.Anything, id).Return(recipe, nil)
@@ -179,9 +230,50 @@ func TestGetRecipe_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	assert.Equal(t, "Pasta Carbonara", got["Title"])
-	assert.Len(t, got["steps"], 1)
-	assert.Len(t, got["ingredients"], 1)
+	assert.Equal(t, "Pasta Carbonara", got["title"])
+	assert.Equal(t, "Classic Italian pasta", got["description"])
+	assert.Equal(t, "https://example.com/carbonara", got["source_url"])
+	servings, ok := got["servings"].(float64)
+	require.True(t, ok)
+	assert.Equal(t, 4, int(servings))
+	prepMinutes, ok := got["prep_minutes"].(float64)
+	require.True(t, ok)
+	assert.Equal(t, 10, int(prepMinutes))
+	cookMinutes, ok := got["cook_minutes"].(float64)
+	require.True(t, ok)
+	assert.Equal(t, 20, int(cookMinutes))
+	assert.Equal(t, now.Format(time.RFC3339Nano), got["created_at"])
+	assert.Equal(t, now.Format(time.RFC3339Nano), got["updated_at"])
+	assert.NotContains(t, got, "Title")
+	assert.NotContains(t, got, "SourceUrl")
+
+	stepsJSON, ok := got["steps"].([]any)
+	require.True(t, ok)
+	require.Len(t, stepsJSON, 1)
+
+	step, ok := stepsJSON[0].(map[string]any)
+	require.True(t, ok)
+	stepNumber, ok := step["step_number"].(float64)
+	require.True(t, ok)
+	assert.Equal(t, 1, int(stepNumber))
+	assert.Equal(t, "Boil pasta", step["instruction"])
+	assert.NotContains(t, step, "StepNumber")
+
+	ingredientsJSON, ok := got["ingredients"].([]any)
+	require.True(t, ok)
+	require.Len(t, ingredientsJSON, 1)
+
+	ingredient, ok := ingredientsJSON[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, ingredients[0].IngredientID.String(), ingredient["ingredient_id"])
+	assert.Empty(t, ingredient["name"])
+	quantity, ok := ingredient["quantity"].(float64)
+	require.True(t, ok)
+	assert.Equal(t, 400, int(quantity))
+	assert.Equal(t, "g", ingredient["unit"])
+	assert.Equal(t, false, ingredient["is_optional"])
+	assert.Empty(t, ingredient["preparation_notes"])
+	assert.NotContains(t, ingredient, "IngredientID")
 }
 
 func TestGetRecipe_NotFound(t *testing.T) {

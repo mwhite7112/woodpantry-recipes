@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -46,6 +47,40 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- list ---
+
+type recipeSummary struct {
+	ID          uuid.UUID `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	SourceURL   string    `json:"source_url"`
+	Servings    int32     `json:"servings"`
+	PrepMinutes int32     `json:"prep_minutes"`
+	CookMinutes int32     `json:"cook_minutes"`
+	Tags        []string  `json:"tags"`
+	CreatedAt   string    `json:"created_at"`
+	UpdatedAt   string    `json:"updated_at"`
+}
+
+func newRecipeSummary(recipe db.Recipe) recipeSummary {
+	summary := recipeSummary{
+		ID:          recipe.ID,
+		Title:       recipe.Title,
+		Description: recipe.Description.String,
+		SourceURL:   recipe.SourceUrl.String,
+		Servings:    recipe.Servings.Int32,
+		PrepMinutes: recipe.PrepMinutes.Int32,
+		CookMinutes: recipe.CookMinutes.Int32,
+		Tags:        recipe.Tags,
+		CreatedAt:   recipe.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   recipe.UpdatedAt.Format(time.RFC3339Nano),
+	}
+
+	if summary.Tags == nil {
+		summary.Tags = []string{}
+	}
+
+	return summary
+}
 
 func handleListRecipes(svc *service.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +119,11 @@ func handleListRecipes(svc *service.Service) http.HandlerFunc {
 		if recipes == nil {
 			recipes = []db.Recipe{}
 		}
-		jsonOK(w, recipes)
+		response := make([]recipeSummary, 0, len(recipes))
+		for _, recipe := range recipes {
+			response = append(response, newRecipeSummary(recipe))
+		}
+		jsonOK(w, response)
 	}
 }
 
@@ -197,17 +236,84 @@ func handleCreateRecipe(svc *service.Service) http.HandlerFunc {
 			return
 		}
 
-		jsonWithStatus(w, http.StatusCreated, recipe)
+		jsonWithStatus(w, http.StatusCreated, newRecipeSummary(recipe))
 	}
 }
 
 // --- get ---
 
 type recipeDetail struct {
-	db.Recipe
+	ID          uuid.UUID                `json:"id"`
+	Title       string                   `json:"title"`
+	Description string                   `json:"description"`
+	SourceURL   string                   `json:"source_url"`
+	Servings    int32                    `json:"servings"`
+	PrepMinutes int32                    `json:"prep_minutes"`
+	CookMinutes int32                    `json:"cook_minutes"`
+	Tags        []string                 `json:"tags"`
+	CreatedAt   string                   `json:"created_at"`
+	UpdatedAt   string                   `json:"updated_at"`
+	Steps       []recipeStepResponse     `json:"steps"`
+	Ingredients []recipeIngredientDetail `json:"ingredients"`
+}
 
-	Steps       []db.RecipeStep       `json:"steps"`
-	Ingredients []db.RecipeIngredient `json:"ingredients"`
+type recipeStepResponse struct {
+	StepNumber  int32  `json:"step_number"`
+	Instruction string `json:"instruction"`
+}
+
+type recipeIngredientDetail struct {
+	IngredientID     uuid.UUID `json:"ingredient_id"`
+	Name             string    `json:"name"`
+	Quantity         float64   `json:"quantity"`
+	Unit             string    `json:"unit"`
+	IsOptional       bool      `json:"is_optional"`
+	PreparationNotes string    `json:"preparation_notes"`
+}
+
+func newRecipeDetail(
+	recipe db.Recipe,
+	steps []db.RecipeStep,
+	ingredients []db.RecipeIngredient,
+) recipeDetail {
+	detail := recipeDetail{
+		ID:          recipe.ID,
+		Title:       recipe.Title,
+		Description: recipe.Description.String,
+		SourceURL:   recipe.SourceUrl.String,
+		Servings:    recipe.Servings.Int32,
+		PrepMinutes: recipe.PrepMinutes.Int32,
+		CookMinutes: recipe.CookMinutes.Int32,
+		Tags:        recipe.Tags,
+		CreatedAt:   recipe.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   recipe.UpdatedAt.Format(time.RFC3339Nano),
+		Steps:       make([]recipeStepResponse, 0, len(steps)),
+		Ingredients: make([]recipeIngredientDetail, 0, len(ingredients)),
+	}
+
+	if detail.Tags == nil {
+		detail.Tags = []string{}
+	}
+
+	for _, step := range steps {
+		detail.Steps = append(detail.Steps, recipeStepResponse{
+			StepNumber:  step.StepNumber,
+			Instruction: step.Instruction,
+		})
+	}
+
+	for _, ingredient := range ingredients {
+		detail.Ingredients = append(detail.Ingredients, recipeIngredientDetail{
+			IngredientID:     ingredient.IngredientID,
+			Name:             "",
+			Quantity:         ingredient.Quantity.Float64,
+			Unit:             ingredient.Unit.String,
+			IsOptional:       ingredient.IsOptional,
+			PreparationNotes: ingredient.PreparationNotes.String,
+		})
+	}
+
+	return detail
 }
 
 func handleGetRecipe(svc *service.Service) http.HandlerFunc {
@@ -242,7 +348,7 @@ func handleGetRecipe(svc *service.Service) http.HandlerFunc {
 		if ingredients == nil {
 			ingredients = []db.RecipeIngredient{}
 		}
-		jsonOK(w, recipeDetail{Recipe: recipe, Steps: steps, Ingredients: ingredients})
+		jsonOK(w, newRecipeDetail(recipe, steps, ingredients))
 	}
 }
 
@@ -353,7 +459,7 @@ func handleUpdateRecipe(svc *service.Service) http.HandlerFunc {
 			return
 		}
 
-		jsonOK(w, recipe)
+		jsonOK(w, newRecipeSummary(recipe))
 	}
 }
 

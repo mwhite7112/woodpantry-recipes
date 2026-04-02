@@ -88,7 +88,9 @@ func TestIntegration_CRUDCycle(t *testing.T) {
 
 	var created map[string]interface{}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
-	recipeID := created["ID"].(string)
+	assert.Equal(t, "Pasta Carbonara", created["title"])
+	assert.NotContains(t, created, "Title")
+	recipeID := created["id"].(string)
 
 	// Get the recipe.
 	req = httptest.NewRequest(http.MethodGet, "/recipes/"+recipeID, nil)
@@ -98,9 +100,20 @@ func TestIntegration_CRUDCycle(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	var detail map[string]interface{}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &detail))
-	assert.Equal(t, "Pasta Carbonara", detail["Title"])
+	assert.Equal(t, "Pasta Carbonara", detail["title"])
+	assert.NotContains(t, detail, "Title")
 	assert.Len(t, detail["steps"], 2)
 	assert.Len(t, detail["ingredients"], 1)
+
+	steps := detail["steps"].([]interface{})
+	firstStep := steps[0].(map[string]interface{})
+	assert.Equal(t, float64(1), firstStep["step_number"])
+	assert.NotContains(t, firstStep, "StepNumber")
+
+	ingredients := detail["ingredients"].([]interface{})
+	firstIngredient := ingredients[0].(map[string]interface{})
+	assert.Equal(t, ingredientID.String(), firstIngredient["ingredient_id"])
+	assert.NotContains(t, firstIngredient, "IngredientID")
 
 	// List recipes.
 	req = httptest.NewRequest(http.MethodGet, "/recipes", nil)
@@ -111,6 +124,8 @@ func TestIntegration_CRUDCycle(t *testing.T) {
 	var list []map[string]interface{}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
 	assert.Len(t, list, 1)
+	assert.Equal(t, "Pasta Carbonara", list[0]["title"])
+	assert.NotContains(t, list[0], "Title")
 
 	// Update the recipe.
 	updateBody := `{
@@ -132,6 +147,10 @@ func TestIntegration_CRUDCycle(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
+	var updated map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &updated))
+	assert.Equal(t, "Pasta Carbonara Updated", updated["title"])
+	assert.NotContains(t, updated, "Title")
 
 	// Verify update.
 	req = httptest.NewRequest(http.MethodGet, "/recipes/"+recipeID, nil)
@@ -139,7 +158,7 @@ func TestIntegration_CRUDCycle(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &detail))
-	assert.Equal(t, "Pasta Carbonara Updated", detail["Title"])
+	assert.Equal(t, "Pasta Carbonara Updated", detail["title"])
 	assert.Len(t, detail["steps"], 3)
 
 	// Delete the recipe.
@@ -194,7 +213,8 @@ func TestIntegration_ListByTag(t *testing.T) {
 	var list []map[string]interface{}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
 	assert.Len(t, list, 1)
-	assert.Equal(t, "Vegan Salad", list[0]["Title"])
+	assert.Equal(t, "Vegan Salad", list[0]["title"])
+	assert.NotContains(t, list[0], "Title")
 
 	// List by tag "nonexistent".
 	req = httptest.NewRequest(http.MethodGet, "/recipes?tag=nonexistent", nil)
@@ -228,7 +248,8 @@ func TestIntegration_CreateRecipe_PreservesProvidedIngredientID(t *testing.T) {
 
 	var created map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
-	recipeID := created["ID"].(string)
+	assert.Equal(t, "Structured ID Create", created["title"])
+	recipeID := created["id"].(string)
 
 	req = httptest.NewRequest(http.MethodGet, "/recipes/"+recipeID, nil)
 	rec = httptest.NewRecorder()
@@ -263,7 +284,8 @@ func TestIntegration_CreateRecipe_ResolvesIngredientNameWhenIDAbsent(t *testing.
 
 	var created map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
-	recipeID := created["ID"].(string)
+	assert.Equal(t, "Structured Name Create", created["title"])
+	recipeID := created["id"].(string)
 
 	req = httptest.NewRequest(http.MethodGet, "/recipes/"+recipeID, nil)
 	rec = httptest.NewRecorder()
