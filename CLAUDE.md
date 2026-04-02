@@ -28,7 +28,7 @@ All ingest flows follow the **staged commit pattern**: free text in → async ex
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/recipes` | List recipes — filters: `tags`, `cook_time_max`, `title` |
+| GET | `/recipes` | List recipes — filters: `tag`, `cook_time_max`, `title` |
 | POST | `/recipes` | Create a hand-crafted recipe (structured JSON) |
 | GET | `/recipes/:id` | Full recipe detail |
 | PUT | `/recipes/:id` | Update recipe |
@@ -45,6 +45,9 @@ All ingest flows follow the **staged commit pattern**: free text in → async ex
 
 ### Write-Through to Dictionary
 At confirm time, and on direct structured create when needed, ingredients are persisted as canonical IDs. If `ingredient_id` is already present, it is used directly. Otherwise, fallback resolution calls `POST /ingredients/resolve` by name.
+
+### Response Contract
+Recipe CRUD endpoints use explicit lowercase API JSON fields. Response payloads should expose keys like `id`, `title`, `source_url`, `created_at`, `step_number`, and `ingredient_id`, not raw sqlc/Go struct field names.
 
 ### Embeddings (Phase 3)
 After a recipe is committed, a background goroutine generates an embedding via the OpenAI API and stores it in the `embedding` column. The recipe is fully usable before the embedding is ready. `POST /recipes/search` uses pgvector cosine similarity to rank results.

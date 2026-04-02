@@ -7,7 +7,7 @@ Recipe Service for WoodPantry. Owns the recipe corpus and staged recipe ingest r
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/healthz` | Health check |
-| GET | `/recipes` | List recipes (`?tags=italian&cook_time_max=45&title=pasta`) |
+| GET | `/recipes` | List recipes (`?tag=italian&cook_time_max=45&title=pasta`) |
 | POST | `/recipes` | Create a structured recipe directly |
 | GET | `/recipes/:id` | Full recipe detail |
 | PUT | `/recipes/:id` | Update recipe |
@@ -59,6 +59,8 @@ Returns the persisted `ingestion_jobs` record. When the ingestion worker publish
 ### POST /recipes
 
 Creates a recipe from structured JSON. Each ingredient may provide either a canonical `ingredient_id` or a `name`. When `ingredient_id` is omitted, the service resolves `name` through the Ingredient Dictionary before persisting the recipe ingredient row.
+
+Recipe CRUD responses use lowercase JSON field names such as `id`, `title`, `source_url`, `created_at`, `step_number`, and `ingredient_id`.
 
 ```json
 {
